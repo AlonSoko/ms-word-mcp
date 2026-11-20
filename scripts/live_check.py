@@ -268,6 +268,7 @@ def run_steps(path: str) -> None:
     run_style_numbering_steps()
     run_style_language_steps()
     run_list_of_figures_steps()
+    run_equation_edit_steps()
     run_picture_and_page_steps(Path(path).parent)
     run_review_steps()
     run_heading_number_steps()
@@ -1813,6 +1814,47 @@ def run_list_of_figures_steps() -> None:
         step("the list of figures holds the third", text._find_replace_impl, "Later", None, True,
              False, False, check=lambda o: o.get("matches", 0) >= 2)
         step("close the document for lists of figures", documents._close_document_impl, False)
+    finally:
+        call_document.reset(token)
+
+
+def run_equation_edit_steps() -> None:
+    """Changing an equation in place: its number and its neighbours' stay."""
+    other = step("a document for changing equations", documents._create_document_impl, None, None)
+    if "error" in other:
+        return
+    token = call_document.set(other["full_name"])
+    try:
+        made = step("a paragraph before them", text._insert_paragraphs_impl,
+                    [{"text": "Equations", "style": "Heading 1"}], None, None)
+        if "error" in made:
+            return
+        first = step("equation (1)", equations._insert_equation_impl, "E=mc^2", "latex", True,
+                     "Equation", 1, None, undo="Insert equation",
+                     check=lambda o: o.get("number") == "1")
+        step("equation (2)", equations._insert_equation_impl, "a^2+b^2=c^2", "latex", True,
+             "Equation", 2, None, undo="Insert equation", check=lambda o: o.get("number") == "2")
+        step("an equation with no number", equations._insert_equation_impl, "x+y", "latex",
+             False, "Equation", 3, None, undo="Insert equation")
+        if "error" in first:
+            return
+        step("equation (1) changed", equations._set_equation_impl, 2,
+             "\\frac{a}{b}=\\sqrt{c}", "latex", undo="Change equation",
+             check=lambda o: o.get("number") == "1" and "warnings" not in o
+             and o["word_reads_it_as"].startswith("█(") and o["word_reads_it_as"].endswith("#(1) )")
+             and "√" in o["word_reads_it_as"])
+        step("the numbers stay (1) and (2)", equations._list_equations_impl,
+             check=lambda o: [e.get("number") for e in o["equations"]][:2] == ["1", "2"])
+        step("and it reads back as changed", equations._get_equation_impl, 2,
+             check=lambda o: "√" in o["unicodemath"] and "mc" not in o["unicodemath"])
+        step("the one with no number changed", equations._set_equation_impl, 4, "x-y", "unicodemath",
+             undo="Change equation",
+             check=lambda o: "number" not in o and o["word_reads_it_as"] == "𝑥−𝑦")
+        step("a picture of the page with the changed equation", screen._get_page_image_impl, 1,
+             None, check=lambda o: o.get("page") == 1)
+        step("a paragraph with no equation is refused", equations._set_equation_impl, 1, "a",
+             "unicodemath", check=lambda o: "holds no equation" in o.get("error", ""))
+        step("close the document for changing equations", documents._close_document_impl, False)
     finally:
         call_document.reset(token)
 

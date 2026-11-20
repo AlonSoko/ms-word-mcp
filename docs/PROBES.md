@@ -441,3 +441,16 @@ captions' SEQ fields have.
 | No caption of the label | Word fills the list with its own sentence, "No table of figures entries found." | The same |
 | A caption added, then `update field` on the list's field | (`TableOfFigures.Update`) | Left as it was: the new caption is not listed. The `table of figures`' `update` rebuilds it |
 
+## Changing an equation in place (Word 16, both platforms)
+
+Measured 2026-11-20; `run_equation_edit_steps` in `scripts/live_check.py`
+repeats it.
+
+| What | Windows | Mac |
+|---|---|---|
+| A numbered equation, linearized | `█(E=mc^2#(1) )`: an array holding the equation and its number, the 1 a SEQ field | The same |
+| The new text put between the array's opening and "#(" | Built up centred with its number at the right margin; the numbers after it stay | The same (the page picture shows it) |
+| The text from the zone's start instead | The array's opening goes, its closing " )" stays: malformed | The same |
+| The SEQ Field read before the edit, after building up | "Object has been deleted": building up makes the field anew | Read before the edit too |
+| A hyphen in the new text | Built up as a minus sign (x−y) | The same |
+
