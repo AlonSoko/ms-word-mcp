@@ -1203,6 +1203,14 @@ def _describe_mac_style(s, doc=None) -> dict:
     elif kind == "character":
         out["base_style"] = _mac_style_name(s.base_style)
     if kind in ("paragraph", "character"):
+        from .checks import _mac_code
+
+        try:
+            out.update(formatting.style_language(_mac_code(s.language_ID.get()),
+                                                 _mac_code(s.language_ID_east_asian.get()),
+                                                 s.no_proofing.get() is True))
+        except Exception:  # noqa: BLE001 - described without it
+            pass
         out["font"] = P.mac_read(s.font_object, P.FONT_PROPS)
     if kind == "paragraph":
         fmt = s.paragraph_format
@@ -1226,7 +1234,8 @@ def get_style(style):
 
 @mac_impl(formatting._set_style_impl)
 def set_style(style, create, base_style, next_style, font, paragraph, quick_style,
-              priority, automatically_update, no_space_between_same_style, numbering=None):
+              priority, automatically_update, no_space_between_same_style, numbering=None,
+              language=None, east_asian_language=None):
     k = _k()
     doc = backend.word.document()
     exists = True
@@ -1267,6 +1276,17 @@ def set_style(style, create, base_style, next_style, font, paragraph, quick_styl
         raise ValueError(f"'{style}' is a {kind} style, which takes no numbering.")
 
     refused = {}
+    from .checks import LANGUAGES, _mac_language_value
+
+    # Setting `language ID` to no proofing's ID leaves it as it was (measured);
+    # the style's own `no proofing` turns checking off.
+    if language == "no_proofing":
+        s.no_proofing.set(True)
+    elif language is not None:
+        s.language_ID.set(_mac_language_value(LANGUAGES[language]))
+        s.no_proofing.set(False)
+    if east_asian_language is not None:
+        s.language_ID_east_asian.set(_mac_language_value(LANGUAGES[east_asian_language]))
     if numbering is not None:
         # `link to list template` is refused (-1708, measured); VBA's works.
         from . import _vba
@@ -1361,6 +1381,7 @@ def set_style(style, create, base_style, next_style, font, paragraph, quick_styl
     warnings += tab_warnings
     if "numbering" not in refused and "numbering" in described:
         warnings += formatting.numbering_warnings(numbering, described["numbering"], style)
+    warnings += formatting.language_warnings(language, east_asian_language, described)
     if "tab_stops" in para_spec and not tab_warnings:
         warnings += formatting._tab_mismatch(para_spec, described.get("paragraph", {}))
     out = {"success": True, "created": bool(create), "style": described}

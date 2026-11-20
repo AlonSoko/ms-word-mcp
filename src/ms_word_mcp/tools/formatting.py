@@ -23,6 +23,7 @@ from ._word import (
     WD_COLLAPSE_END, WD_FIND_STOP, check_span, clean_text, paragraph_info,
     paragraphs_in, resolve_style, span_range, style_name,
 )
+from .checks import Language
 
 
 class Target(Input):
@@ -294,6 +295,10 @@ def _describe_style(s) -> dict:
         except Exception:  # noqa: BLE001
             out["base_style"] = None
     if kind in ("paragraph", "character"):
+        try:
+            out.update(style_language(s.LanguageID, s.LanguageIDFarEast, s.NoProofing))
+        except Exception:  # noqa: BLE001 - described without it
+            pass
         out["font"] = P.com_read(s.Font, P.FONT_PROPS)
     if kind == "paragraph":
         fmt = s.ParagraphFormat
@@ -361,6 +366,22 @@ def numbering_warnings(numbering, got: dict | None, name: str) -> list[str]:
     return []
 
 
+def style_language(language_id, east_asian_id, no_proofing) -> dict:
+    """A style's languages, in word_set_language's names."""
+    from .checks import language_name
+
+    return {"language": "no_proofing" if no_proofing else language_name(language_id),
+            "east_asian_language": language_name(east_asian_id)}
+
+
+def language_warnings(language, east_asian_language, described: dict) -> list[str]:
+    out = []
+    for key, wanted in (("language", language), ("east_asian_language", east_asian_language)):
+        if wanted is not None and described.get(key) != wanted:
+            out.append(f"{key} reads back as {described.get(key)!r}, not {wanted!r}.")
+    return out
+
+
 class SetStyleInput(Input):
     style: Trimmed = Field(..., min_length=1, description=(
         STYLE_NAME_HELP + " With `create`, the name of the new style."))
@@ -382,6 +403,13 @@ class SetStyleInput(Input):
     no_space_between_same_style: bool | None = Field(None, description=(
         "Paragraph styles: drop the space before and after between paragraphs of "
         "this style (\"Don't add space between paragraphs of the same style\")."))
+    language: Language | None = Field(None, description=(
+        "The language the style's text is checked in, as word_set_language names it "
+        "(english_us, english_uk, japanese...); no_proofing turns checking off. Every "
+        "paragraph in the style follows, which fixes a whole document's language in one call."))
+    east_asian_language: Language | None = Field(None, description=(
+        "The language of its Japanese, Chinese or Korean text (japanese, "
+        "chinese_simplified...)."))
     numbering: StyleNumbering | Literal["none"] | None = Field(None, description=(
         "Paragraph styles: join another style's numbering at a level, as a heading "
         "style of your own joins Heading 1-3 at level 4 ({\"like\": \"Heading 1\", "
@@ -396,9 +424,13 @@ class SetStyleInput(Input):
                                            or self.numbering):
             raise ValueError("next_style, automatically_update, no_space_between_same_style "
                              "and numbering apply to paragraph styles.")
+        if self.east_asian_language == "no_proofing":
+            raise ValueError("no_proofing goes in `language`: it turns checking off for the "
+                             "whole style.")
         if self.create is None and all(getattr(self, f) is None for f in (
                 "base_style", "next_style", "font", "paragraph", "quick_style", "priority",
-                "automatically_update", "no_space_between_same_style", "numbering")):
+                "automatically_update", "no_space_between_same_style", "numbering",
+                "language", "east_asian_language")):
             raise ValueError("Give something to set, or `create` to make the style.")
         return self
 
@@ -439,7 +471,7 @@ def _start_plain(doc, s, kind, base_style) -> None:
 
 def _set_style_impl(style, create, base_style, next_style, font, paragraph, quick_style,
                     priority, automatically_update, no_space_between_same_style,
-                    numbering=None):
+                    numbering=None, language=None, east_asian_language=None):
     doc = backend.word.document()
     existing = _find_style(doc, style)
     if create:
@@ -464,6 +496,15 @@ def _set_style_impl(style, create, base_style, next_style, font, paragraph, quic
                              "first: word_apply_list with linked_style on its level.")
 
     refused = {}
+    from .checks import LANGUAGES
+
+    if language == "no_proofing":
+        s.NoProofing = True
+    elif language is not None:
+        s.LanguageID = LANGUAGES[language]
+        s.NoProofing = False
+    if east_asian_language is not None:
+        s.LanguageIDFarEast = LANGUAGES[east_asian_language]
     if numbering == "none":
         s.LinkToListTemplate(None)
     elif numbering is not None:
@@ -524,6 +565,7 @@ def _set_style_impl(style, create, base_style, next_style, font, paragraph, quic
     warnings += _tab_mismatch(para_spec, described.get("paragraph", {}))
     warnings += P.border_mismatches(para_spec, described.get("paragraph", {}))
     warnings += numbering_warnings(numbering, described.get("numbering"), style)
+    warnings += language_warnings(language, east_asian_language, described)
     result = {"success": True, "created": bool(create), "style": described}
     if warnings:
         result["warnings"] = warnings
@@ -605,4 +647,4 @@ def register(mcp) -> None:
             p.quick_style, p.priority, p.automatically_update,
             p.no_space_between_same_style,
             p.numbering.model_dump() if isinstance(p.numbering, StyleNumbering) else p.numbering,
-            undo="Define style")
+            p.language, p.east_asian_language, undo="Define style")

@@ -418,3 +418,14 @@ Heading 1, level 2 to Heading 2), then Heading 3 linked at level 3 and taken off
 | Joining a list at a level | `Style.LinkToListTemplate(template, 3)`: Heading 3's paragraph reads 1.1.1, and the list's level 3 names Heading 3 | `link to list template` is refused (-1708); through the bridge, as on Windows |
 | Taking a style's numbering off | `LinkToListTemplate(None)`: the paragraph has no list, the headings around it keep theirs (the next Heading 1 reads 2.) | Through the bridge (`LinkToListTemplate Nothing`), the same |
 
+## A style's language (Word 16, both platforms)
+
+Measured 2026-11-20; `run_style_language_steps` in `scripts/live_check.py`
+repeats it.
+
+| What | Windows | Mac |
+|---|---|---|
+| Reading and setting it | `Style.LanguageID`, `LanguageIDFarEast`, `NoProofing` | `language ID`, `language ID east asian`, `no proofing`, through Apple Events; the paragraphs in the style follow |
+| Turning checking off | `NoProofing` | Setting `language ID` to no proofing's ID (1024) leaves it as it was; `no proofing` works, so both platforms use it |
+| A new document's Quote style, on a Mac set to English (Israel) | | `language ID` 0x0C00, the custom locale Word has no dictionary for (Checks): setting the style's language puts every paragraph in it back under checking |
+

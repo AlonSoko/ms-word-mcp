@@ -266,6 +266,7 @@ def run_steps(path: str) -> None:
     run_table_steps()
     run_table_more_steps()
     run_style_numbering_steps()
+    run_style_language_steps()
     run_picture_and_page_steps(Path(path).parent)
     run_review_steps()
     run_heading_number_steps()
@@ -1735,6 +1736,40 @@ def run_style_numbering_steps() -> None:
              {"like": "Body Text", "level": 2},
              check=lambda o: "has no numbering to join" in o.get("error", ""))
         step("close the document for numbered styles", documents._close_document_impl, False)
+    finally:
+        call_document.reset(token)
+
+
+def run_style_language_steps() -> None:
+    """A style's language: set it, turn checking off and on again."""
+    other = step("a document for a style's language", documents._create_document_impl, None, None)
+    if "error" in other:
+        return
+    token = call_document.set(other["full_name"])
+    try:
+        made = step("a quote to set the language of", text._insert_paragraphs_impl,
+                    [{"text": "Colour and behaviour.", "style": "Normal"},
+                     {"text": "A quote in British English.", "style": "Quote"}], None, None)
+        if "error" in made:
+            return
+        step("Quote's language reads", formatting._get_style_impl, "Quote",
+             check=lambda o: "language" in o["style"] and "east_asian_language" in o["style"])
+        step("Quote in British English, its East Asian text in Japanese", formatting._set_style_impl,
+             "Quote", None, None, None, None, None, None, None, None, None, None, "english_uk",
+             "japanese", undo="Define style",
+             check=lambda o: "warnings" not in o
+             and (o["style"]["language"], o["style"]["east_asian_language"]) == ("english_uk",
+                                                                                 "japanese"))
+        step("checking off for Quote", formatting._set_style_impl, "Quote", None, None, None, None,
+             None, None, None, None, None, None, "no_proofing", None, undo="Define style",
+             check=lambda o: "warnings" not in o and o["style"]["language"] == "no_proofing")
+        step("and on again, in American English", formatting._set_style_impl, "Quote", None, None,
+             None, None, None, None, None, None, None, None, "english_us", None, undo="Define style",
+             check=lambda o: "warnings" not in o and o["style"]["language"] == "english_us")
+        step("a character style takes a language too", formatting._set_style_impl, "Strong",
+             None, None, None, None, None, None, None, None, None, None, "english_uk", None,
+             undo="Define style", check=lambda o: o["style"].get("language") == "english_uk")
+        step("close the document for a style's language", documents._close_document_impl, False)
     finally:
         call_document.reset(token)
 
