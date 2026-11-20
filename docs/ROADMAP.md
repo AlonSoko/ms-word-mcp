@@ -127,12 +127,12 @@ Then, ordered roughly by what the owner stressed.
 1. **Styles, the rest.** Done: list linkage and a style's language; tab
    stops and creating a style on the Mac go through the VBA bridge.
 2. **Lists, the rest.** Picture bullets.
-3. **Equations, the rest.** Chapter-style numbers (2.1) with STYLEREF.
-   (Editing an equation in place, cross-references to equations and inline
-   equations inside a paragraph are done.)
-4. **Figures and tables, the rest.** Numbers with the chapter (2.1). (A list
-   of figures, splitting cells, sorting, and table borders one side at a time
-   are done.)
+3. ~~**Equations, the rest.**~~ Done: editing an equation in place,
+   cross-references to equations, inline equations inside a paragraph, and
+   chapter-style numbers (2.1).
+4. ~~**Figures and tables, the rest.**~~ Done: numbers with the chapter (2.1), a
+   list of figures, splitting cells, sorting, and table borders one side at a
+   time.
 5. **Japanese typography, the rest.** Removing ruby outright, tate-chu-yoko.
 6. **View.** Zoom (percentage, page width, whole page), view type, follow
    edits in a second window.

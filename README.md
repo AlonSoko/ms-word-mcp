@@ -185,7 +185,7 @@ Every member and constant is checked against Microsoft's documentation ([docs/re
 
 ### 🧮 Equations
 
-`word_insert_equation` takes LaTeX or UnicodeMath and has Word's own equation editor build it. With `numbered`, the number sits at the right margin and is a field, so inserting an equation renumbers the rest. `word_insert_inline_equation` puts one among a paragraph's words, at the start or end of its text or in place of a placeholder; `word_get_equation` and `word_set_equation` reach it by its place in the paragraph (`nth`).
+`word_insert_equation` takes LaTeX or UnicodeMath and has Word's own equation editor build it. With `numbered`, the number sits at the right margin and is a field, so inserting an equation renumbers the rest. `word_insert_inline_equation` puts one among a paragraph's words, at the start or end of its text or in place of a placeholder; `word_get_equation` and `word_set_equation` reach it by its place in the paragraph (`nth`). With `chapter`, numbered equations and captions (`word_insert_caption`) count within each chapter, (2.1) and Figure 2.1, the chapter's number taken from the numbered heading before them.
 
 ### 🖼️ Shapes and Floating Pictures
 

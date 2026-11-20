@@ -185,7 +185,7 @@ Windows では、対象が Word のアクティブな文書のとき、1 回の�
 
 ### 🧮 数式
 
-`word_insert_equation` は LaTeX または UnicodeMath を受け取り、Word 自身の数式エディターで組み立てます。`numbered` を付けると、番号は右端にフィールドとして入るので、数式を挿入すると以降の番号が振り直されます。`word_insert_inline_equation` は段落の文中に数式を入れます（文の先頭・末尾、またはプレースホルダーの位置）。`word_get_equation` と `word_set_equation` は段落の中の何番目か（`nth`）で指定します。
+`word_insert_equation` は LaTeX または UnicodeMath を受け取り、Word 自身の数式エディターで組み立てます。`numbered` を付けると、番号は右端にフィールドとして入るので、数式を挿入すると以降の番号が振り直されます。`word_insert_inline_equation` は段落の文中に数式を入れます（文の先頭・末尾、またはプレースホルダーの位置）。`word_get_equation` と `word_set_equation` は段落の中の何番目か（`nth`）で指定します。`chapter` を付けると、番号付きの数式とキャプション（`word_insert_caption`）が章ごとに (2.1)、図 2.1 のように振られます。章番号は直前の番号付き見出しから取ります。
 
 ### 🖼️ 図形と浮動の画像
 

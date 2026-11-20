@@ -289,6 +289,7 @@ def run_steps(path: str) -> None:
     run_shape_steps()
     run_group_steps()
     run_header_shape_steps()
+    run_chapter_number_steps()
     run_floating_picture_steps(Path(path).parent)
     run_safety_steps(Path(path).parent)
     step("picture of page 1", screen._get_page_image_impl, 1, None,
@@ -2076,6 +2077,63 @@ def run_header_shape_steps() -> None:
                  undo="Insert floating picture",
                  check=lambda o: o.get("kind") == "picture" and o.get("in") == in_header)
         step("close the document for header shapes", documents._close_document_impl, False)
+    finally:
+        call_document.reset(token)
+
+
+def run_chapter_number_steps() -> None:
+    """Captions and equations numbered with their chapter: Figure 2.1, (2.1)."""
+    other = step("a document for chapter numbers", documents._create_document_impl, None, None)
+    if "error" in other:
+        return
+    token = call_document.set(other["full_name"])
+    chapter = {"level": 1, "separator": "."}
+    try:
+        made = step("two chapters", text._insert_paragraphs_impl,
+                    [{"text": "Intro", "style": "Heading 1"}, {"text": "See the chart.", "style": "Normal"},
+                     {"text": "Method", "style": "Heading 1"}, {"text": "Two charts.", "style": "Normal"}],
+                    None, None)
+        if "error" in made:
+            return
+        step("the chapters numbered", lists._apply_list_impl, 1, 1,
+             [{"level": 1, "number_style": "arabic", "number_format": "%1",
+               "linked_style": "Heading 1"}], None, False, undo="Apply list",
+             check=lambda o: o["paragraphs"][0]["list_string"] == "1")
+        step("a caption in chapter 1", references._insert_caption_impl, "Sales", "Figure", ": ",
+             None, None, 2, None, chapter, undo="Insert caption",
+             check=lambda o: o.get("number") == "1.1" and "warnings" not in o
+             and references.no_marks(o.get("text")) == "Figure 1.1: Sales")
+        # 1 Intro, 2 text, 3 Figure 1.1, 4 Method, 5 text
+        step("a caption in chapter 2 counts from 1", references._insert_caption_impl, "Costs",
+             "Figure", ": ", None, None, 5, None, chapter, undo="Insert caption",
+             check=lambda o: o.get("number") == "2.1")
+        step("and the next one in it", references._insert_caption_impl, "Profit", "Figure", ": ",
+             None, None, 6, None, chapter, undo="Insert caption",
+             check=lambda o: o.get("number") == "2.2" and references.no_marks(o.get("text")) == "Figure 2.2: Profit")
+        step("the captions listed with their chapters", references._list_captions_impl,
+             check=lambda o: [c["number"] for c in o["captions"]] == ["1.1", "2.1", "2.2"])
+        step("a reference to Figure 2.2", references._insert_cross_reference_impl, 5, 7,
+             "label_and_number", "end", None, undo="Insert cross-reference",
+             check=lambda o: references.no_marks(o.get("result")) == "Figure 2.2")
+        step("and to its number", references._insert_cross_reference_impl, 5, 7, "number", "end",
+             None, undo="Insert cross-reference", check=lambda o: references.no_marks(o.get("result")) == "2.2")
+        step("a numbered equation in chapter 2", equations._insert_equation_impl, "E=mc^2",
+             "latex", True, "Equation", 7, None, chapter, undo="Insert equation",
+             check=lambda o: o.get("number") == "2.1" and "warnings" not in o)
+        step("the equation listed with its chapter", equations._list_equations_impl,
+             check=lambda o: [e.get("number") for e in o["equations"]] == ["2.1"])
+        step("a reference to (2.1)", references._insert_cross_reference_impl, 5, 8,
+             "label_and_number", "end", None, undo="Insert cross-reference",
+             check=lambda o: references.no_marks(o.get("result")) == "(2.1)")
+        step("the referring paragraph reads them", text._get_paragraphs_impl, 5, 5, False,
+             check=lambda o: references.no_marks(o["paragraphs"][0]["text"]) == "Two charts.Figure 2.22.2(2.1)")
+        step("chapters by a heading level the document does not have warn",
+             references._insert_caption_impl, "Cover", "Table", ": ", None, None, 8, None,
+             {"level": 2, "separator": "-"}, undo="Insert caption",
+             check=lambda o: "numbered Heading 2" in " ".join(o.get("warnings", [])))
+        step("a picture of the page", screen._get_page_image_impl, 1, None,
+             check=lambda o: o.get("page") == 1)
+        step("close the document for chapter numbers", documents._close_document_impl, False)
     finally:
         call_document.reset(token)
 

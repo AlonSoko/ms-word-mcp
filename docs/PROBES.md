@@ -507,3 +507,18 @@ repeats it.
 | Where a shape is | `Anchor.StoryType` (7 primary header, 9 primary footer...) and `Anchor.Sections(1)` | `anchor`'s `story type` (`primary header story`...) |
 | A floating picture | Made in line at the header paragraph, then `ConvertToShape` | Not done: the picture is made in line first, and `header footer` has no inline shapes |
 
+## Numbers with the chapter (Word 16, both platforms)
+
+Measured 2026-11-21; `run_chapter_number_steps` in `scripts/live_check.py`
+repeats it.
+
+| What | Answer |
+|---|---|
+| A caption's number as `STYLEREF 1 \s`, a separator, `SEQ Figure \* ARABIC \s 1` (as Word's own Insert Caption with the chapter number) | Figure 1.1 under the numbered heading 1; 2.1 and 2.2 under heading 2, the count starting again |
+| The same in a numbered equation's `#(1.1)`, its last 1 the SEQ field and the one before it the STYLEREF | (2.1) at the right margin; a thin space after the period on Windows, a wider one on the Mac, as Word sets a period in math |
+| The separator quoted as ordinary text in the equation, `#(1"."1)` | The equation stayed in its linear form on the page (Mac): not done |
+| Cross-references bookmarking from the STYLEREF to the SEQ | "Figure 2.2", "2.2" and "(2.1)" |
+| A STYLEREF result on Word for Mac | "\u200e2": a left-to-right mark before the number, with every switch (\s, \n, \r, \w, \t) and by style name; the numbers the tools answer leave it out |
+| A caption before any heading of the level | Word searches on and takes the next heading's number (1.1) |
+| A heading level the document does not have | "Error! No text of specified style in document.": the call warns |
+

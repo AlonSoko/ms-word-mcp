@@ -24,7 +24,7 @@ import tempfile
 import time
 from typing import Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .. import backend
 from ._common import (READ_ONLY, WRITES, Input, Trimmed, annotations, call, follow, local_path,
@@ -102,6 +102,49 @@ class SetPictureInput(_Position, _Wrap, _PictureLook):
         return self
 
 
+class ChapterNumber(BaseModel):
+    """Numbers with the chapter's: Figure 2.1, (2.1)."""
+    model_config = ConfigDict(extra="forbid")
+
+    level: int = Field(1, ge=1, le=9, description=(
+        "The heading level whose number is the chapter's: 1 for Heading 1. The count "
+        "starts again at each heading of that level."))
+    separator: Literal[".", "-", ":", "–", "—"] = Field(".", description=(
+        "Between the chapter's number and the count: 2.1, 2-1, 2:1..."))
+
+
+CHAPTER = Field(None, description=(
+    "Number with the chapter: \"Figure 2.1\", counting again in each chapter, as Word's "
+    "Insert Caption > Numbering > Include chapter number does. The chapter's number is "
+    "that of the Heading `level` before it, so the headings need numbers (word_apply_list "
+    "with levels linked to the heading styles)."))
+
+
+def chapter_codes(sequence: str, level: int) -> tuple[str, str]:
+    """(STYLEREF, SEQ) field codes of a number with its chapter's."""
+    return f"STYLEREF {level} \\s", f"SEQ {sequence} \\* ARABIC \\s {level}"
+
+
+def no_marks(text: str) -> str:
+    """Without the left-to-right and right-to-left marks Word for Mac puts before
+    a paragraph number (measured: STYLEREF answered "\\u200e1" with every switch)."""
+    return (text or "").replace("\u200e", "").replace("\u200f", "")
+
+
+def chapter_warning(chapter_text: str, level: int) -> list[str]:
+    """A warning when the chapter's number did not come out as one."""
+    t = no_marks(chapter_text).strip()
+    if t and t[0].isdigit() or (t and t.isalpha() and len(t) <= 4):
+        return []
+    return [f"The chapter's number reads {t!r}: it comes from a numbered Heading {level} "
+            "before this one. Number the headings (word_apply_list, with levels linked to "
+            "the heading styles), then word_update_fields."]
+
+
+def joined_number(chapter: str | None, between: str, count: str) -> str:
+    return f"{no_marks(chapter)}{between}{count}" if chapter is not None else count
+
+
 class InsertCaptionInput(Input):
     text: str = Field("", description="The caption's words, after its label and number.")
     label: Trimmed = Field("Figure", min_length=1, max_length=40, description=(
@@ -114,6 +157,7 @@ class InsertCaptionInput(Input):
     for_table: int | None = Field(None, ge=1, description="Put the caption above this table.")
     after: int | None = Field(None, ge=0, description="Or after this paragraph.")
     before: int | None = Field(None, ge=1, description="Or before this paragraph.")
+    chapter: ChapterNumber | None = CHAPTER
 
     @model_validator(mode="after")
     def _where(self):
@@ -301,27 +345,66 @@ def _caption_where(doc, for_picture, for_table, after, before):
     return _place(doc.Paragraphs.Count, after, before)
 
 
-def _insert_caption_impl(text_, label, separator, for_picture, for_table, after, before):
+def _insert_caption_impl(text_, label, separator, for_picture, for_table, after, before,
+                         chapter=None):
     from . import fields, text
 
     doc = backend.word.document()
     after, before = _caption_where(doc, for_picture, for_table, after, before)
-    words = f"{label} X{separator}{text_}".replace("\n", "\v")
+    between = chapter["separator"] if chapter else ""
+    words = (f"{label} " + ("C" + between if chapter else "") + f"X{separator}{text_}"
+             ).replace("\n", "\v")
     index = text._insert_paragraphs_impl([{"text": words, "style": "Caption"}], after,
                                          before)["inserted"][0]["index"]
     at = paragraph(doc, index).Range.Start + _u16(label) + 1
-    field = doc.Fields.Add(doc.Range(at, at + 1), fields.WD_FIELD_EMPTY,
-                           f"SEQ {seq_name(label)} \\* ARABIC", False)
-    field.Update()
-    number = field.Result.Text
+    if chapter:
+        styleref, seq_code = chapter_codes(seq_name(label), chapter["level"])
+        count_at = at + 1 + _u16(between)
+        # The count first: the chapter's field before it would move its place.
+        doc.Fields.Add(doc.Range(count_at, count_at + 1), fields.WD_FIELD_EMPTY, seq_code,
+                       False).Update()
+        doc.Fields.Add(doc.Range(at, at + 1), fields.WD_FIELD_EMPTY, styleref, False).Update()
+    else:
+        doc.Fields.Add(doc.Range(at, at + 1), fields.WD_FIELD_EMPTY,
+                       f"SEQ {seq_name(label)} \\* ARABIC", False).Update()
     fields._update_fields_impl("numbers", None, None)
     fields._update_fields_impl("references", None, None)
     # Later captions have renumbered, so the number is read again.
     p = paragraph(doc, index)
-    number = _seq_in(p).Result.Text or number
+    seq = _seq_in(p)
+    chap = _chapter_of(doc, p, seq)
+    number = full_number(doc, seq, chap)
     follow(doc, p.Range)
-    return {"success": True, "index": index, "label": label, "number": number,
-            "text": clean_text(p.Range.Text), "paragraphs": doc.Paragraphs.Count}
+    out = {"success": True, "index": index, "label": label, "number": number,
+           "text": clean_text(p.Range.Text), "paragraphs": doc.Paragraphs.Count}
+    if chapter:
+        warnings = chapter_warning(chap.Result.Text if chap else "", chapter["level"])
+        if warnings:
+            out["warnings"] = warnings
+    return out
+
+
+def _chapter_of(doc, p, seq):
+    """The STYLEREF field just before a number's SEQ field, its chapter's; None."""
+    from .fields import _kind
+
+    if seq is None:
+        return None
+    found = p.Range.Fields
+    begin = seq.Code.Start - 1
+    for i in range(1, found.Count + 1):
+        f = found.Item(i)
+        if _kind(f.Code.Text) == "STYLEREF" and 0 <= begin - (f.Result.End + 1) <= 3:
+            return f
+    return None
+
+
+def full_number(doc, seq, chap) -> str:
+    """A number as it reads: "2.1" with its chapter's, else the count."""
+    if chap is None:
+        return seq.Result.Text
+    between = doc.Range(chap.Result.End + 1, seq.Code.Start - 1).Text or ""
+    return joined_number(chap.Result.Text, between, seq.Result.Text)
 
 
 def _seq_in(p):
@@ -346,7 +429,8 @@ def _list_captions_impl():
             continue
         index = doc.Range(0, f.Code.Start + 1).Paragraphs.Count
         p = paragraph(doc, index)
-        out.append({"index": index, "label": code[1], "number": f.Result.Text,
+        number = full_number(doc, f, _chapter_of(doc, p, f))
+        out.append({"index": index, "label": code[1], "number": number,
                     "equation": bool(p.Range.OMaths.Count), "text": clean_text(p.Range.Text)})
     return {"success": True, "captions": out}
 
@@ -363,7 +447,9 @@ def _insert_cross_reference_impl(index, to, show, position, match):
             raise ValueError(NO_NUMBER.format(index=to))
         end = seq.Result.End + 1  # past the field's end mark
         whole = show == "label_and_number" and not rng.OMaths.Count
-        start = rng.Start if whole else seq.Code.Start - 1  # the field's begin mark
+        chap = _chapter_of(doc, target, seq)  # a chapter's number is part of it
+        first = chap if chap is not None else seq
+        start = rng.Start if whole else first.Code.Start - 1  # the field's begin mark
     else:
         start, end = rng.Start, rng.End - 1
     name = _bookmark_name()
@@ -539,7 +625,8 @@ def _mac_seq_in(doc, index):
 
 
 @mac_impl(_insert_caption_impl)
-def _mac_insert_caption(text_, label, separator, for_picture, for_table, after, before):
+def _mac_insert_caption(text_, label, separator, for_picture, for_table, after, before,
+                        chapter=None):
     from . import fields
     from . import mac as m
     from . import text
@@ -548,20 +635,64 @@ def _mac_insert_caption(text_, label, separator, for_picture, for_table, after, 
     word = backend.word
     doc = word.document()
     after, before = _mac_caption_where(doc, for_picture, for_table, after, before)
-    words = f"{label} X{separator}{text_}".replace("\n", "\v")
+    between = chapter["separator"] if chapter else ""
+    words = (f"{label} " + ("C" + between if chapter else "") + f"X{separator}{text_}"
+             ).replace("\n", "\v")
     index = MAC_IMPLS[text._insert_paragraphs_impl.__name__](
         [{"text": words, "style": "Caption"}], after, before)["inserted"][0]["index"]
     at = m._bounds(doc, index)[0] + _u16(label) + 1
-    fields._mac_new_field(word.get_app(), doc, at, at + 1,
-                          f"SEQ {seq_name(label)} \\* ARABIC").update_field()
+    app = word.get_app()
+    if chapter:
+        styleref, seq_code = chapter_codes(seq_name(label), chapter["level"])
+        count_at = at + 1 + _u16(between)
+        fields._mac_new_field(app, doc, count_at, count_at + 1, seq_code).update_field()
+        fields._mac_new_field(app, doc, at, at + 1, styleref).update_field()
+    else:
+        fields._mac_new_field(app, doc, at, at + 1,
+                              f"SEQ {seq_name(label)} \\* ARABIC").update_field()
     update = MAC_IMPLS[fields._update_fields_impl.__name__]
     update("numbers", None, None)
     update("references", None, None)
     seq = _mac_seq_in(doc, index)
-    return {"success": True, "index": index, "label": label,
-            "number": m._clean(seq.result_range.content.get()),
-            "text": m._clean(doc.paragraphs[index].text_object.content.get()),
-            "paragraphs": m._count(doc)}
+    chap = _mac_chapter_of(doc, index, seq)
+    out = {"success": True, "index": index, "label": label,
+           "number": mac_full_number(doc, seq, chap),
+           "text": m._clean(doc.paragraphs[index].text_object.content.get()),
+           "paragraphs": m._count(doc)}
+    if chapter:
+        warnings = chapter_warning(m._clean(chap.result_range.content.get()) if chap else "",
+                                   chapter["level"])
+        if warnings:
+            out["warnings"] = warnings
+    return out
+
+
+def _mac_chapter_of(doc, index, seq):
+    """_chapter_of, on Word for Mac."""
+    from . import mac as m
+    from .fields import _kind, _mac_fields
+
+    if seq is None:
+        return None
+    start, end = m._bounds(doc, index)
+    begin = seq.field_code.start_of_content.get() - 1
+    for f in _mac_fields(doc):
+        at = f.field_code.start_of_content.get()
+        if start <= at < end and _kind(f.field_code.content.get()) == "STYLEREF" and \
+                0 <= begin - (f.result_range.end_of_content.get() + 1) <= 3:
+            return f
+    return None
+
+
+def mac_full_number(doc, seq, chap) -> str:
+    from . import mac as m
+
+    count = m._clean(seq.result_range.content.get())
+    if chap is None:
+        return count
+    a, b = chap.result_range.end_of_content.get() + 1, seq.field_code.start_of_content.get() - 1
+    between = doc.create_range(start=a, end_=b).content.get() if b > a else ""
+    return joined_number(m._clean(chap.result_range.content.get()), between or "", count)
 
 
 @mac_impl(_list_captions_impl)
@@ -581,7 +712,7 @@ def _mac_list_captions():
         index = m._index_at(doc, f.field_code.start_of_content.get())
         rng = doc.paragraphs[index].text_object
         out.append({"index": index, "label": parts[1],
-                    "number": m._clean(f.result_range.content.get()),
+                    "number": mac_full_number(doc, f, _mac_chapter_of(doc, index, f)),
                     "equation": int(rng.count(each=k.math_object)) > 0,
                     "text": m._clean(rng.content.get())})
     return {"success": True, "captions": out}
@@ -604,8 +735,9 @@ def _mac_insert_cross_reference(index, to, show, position, match):
             raise ValueError(NO_NUMBER.format(index=to))
         stop = seq.result_range.end_of_content.get() + 1  # past the field's end mark
         equation = int(doc.paragraphs[to].text_object.count(each=k.math_object)) > 0
+        first = _mac_chapter_of(doc, to, seq) or seq  # a chapter's number is part of it
         begin = start if show == "label_and_number" and not equation else (
-            seq.field_code.start_of_content.get() - 1)  # the field's begin mark
+            first.field_code.start_of_content.get() - 1)  # the field's begin mark
     else:
         begin, stop = start, end - 1
     name = _bookmark_name()
@@ -668,7 +800,8 @@ def register(mcp) -> None:
         counts on its own, and the numbers renumber themselves."""
         p = params
         return await call(_insert_caption_impl, p.text, p.label, p.separator, p.for_picture,
-                          p.for_table, p.after, p.before, undo="Insert caption")
+                          p.for_table, p.after, p.before,
+                          p.chapter.model_dump() if p.chapter else None, undo="Insert caption")
 
     @mcp.tool(name="word_list_captions", annotations=annotations("List captions", READ_ONLY))
     async def word_list_captions(params: NoInput) -> str:

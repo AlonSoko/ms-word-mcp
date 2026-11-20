@@ -24,6 +24,7 @@ from .. import backend
 from ._common import READ_ONLY, WRITES, Input, Trimmed, annotations, call, follow, mac_impl, mac_with_active
 from ._word import clean_text, paragraph
 from .latex import LatexError, latex_to_unicodemath
+from .references import ChapterNumber, chapter_codes, chapter_warning, joined_number
 
 WD_FIELD_SEQUENCE = 12  # WdFieldType wdFieldSequence (reference/equations.md)
 NUMBER_MARK = "#(1)"
@@ -46,9 +47,15 @@ class InsertEquationInput(Input):
     after: int | None = Field(None, ge=0, description=(
         "Insert after this paragraph (0 = at the very start)."))
     before: int | None = Field(None, ge=1, description="Insert before this paragraph.")
+    chapter: ChapterNumber | None = Field(None, description=(
+        "With `numbered`: number with the chapter, (2.1), counting again in each chapter. "
+        "The chapter's number is that of the Heading `level` before the equation, so the "
+        "headings need numbers (word_apply_list with levels linked to the heading styles)."))
 
     @model_validator(mode="after")
     def _one_place(self):
+        if self.chapter is not None and not self.numbered:
+            raise ValueError("`chapter` numbers a numbered equation: give `numbered` too.")
         if self.after is not None and self.before is not None:
             raise ValueError("Give `after` or `before`, not both. Leave both out to add "
                              "at the end.")
@@ -97,6 +104,13 @@ def nth_of(starts: list[int], at: int) -> int:
     return next((i for i, s in enumerate(order, 1) if s >= at), len(order))
 
 
+def number_mark(chapter) -> str:
+    """What a numbered equation is written with: "#(1)", or "#(1.1)" with its
+    chapter's, each 1 made a field afterwards. (Quoting the separator as
+    ordinary text left the equation in its linear form: measured on the Mac.)"""
+    return f"#(1{chapter['separator']}1)" if chapter else NUMBER_MARK
+
+
 def _last_one(char_at, start: int, end: int) -> int | None:
     """Word's position of the last "1" in [start, end): the number of "#(1)".
 
@@ -123,15 +137,15 @@ def _seq_fields(doc, sequence: str):
     return out
 
 
-def _insert_equation_impl(equation, fmt, numbered, sequence, after, before):
+def _insert_equation_impl(equation, fmt, numbered, sequence, after, before, chapter=None):
     from . import text
 
     linear = to_unicodemath(equation, fmt)
     # In Normal, whatever paragraph it lands next to (a heading's style would
     # otherwise carry over).
     written = text._insert_paragraphs_impl(
-        [{"text": linear + (NUMBER_MARK if numbered else ""), "style": "Normal"}], after,
-        before)
+        [{"text": linear + (number_mark(chapter) if numbered else ""), "style": "Normal"}],
+        after, before)
     index = written["inserted"][0]["index"]
     doc = backend.word.document()
     p = paragraph(doc, index)
@@ -148,12 +162,30 @@ def _insert_equation_impl(equation, fmt, numbered, sequence, after, before):
             warnings.append("The equation number could not be found to make it a field; "
                             "it stays (1).")
         else:
+            seq_text = sequence if not chapter else chapter_codes(
+                sequence, chapter["level"])[1].removeprefix("SEQ ")
             field = doc.Fields.Add(doc.Range(start, start + 1), WD_FIELD_SEQUENCE,
-                                   sequence, False)
+                                   seq_text, False)
+            chap = None
+            if chapter:
+                # The chapter's "1" is the one before the count's field.
+                begin = field.Code.Start - 1
+                at = _last_one(lambda pos: doc.Range(pos, pos + 1).Text, begin - 6, begin)
+                if at is None:
+                    warnings.append("The chapter's place in the number could not be found; "
+                                    "the number counts without it.")
+                else:
+                    chap = doc.Fields.Add(doc.Range(at, at + 1), -1,
+                                          chapter_codes(sequence, chapter["level"])[0], False)
+                    chap.Update()
             for f in _seq_fields(doc, sequence):
                 if may_update(f.Code.Text):
                     f.Update()
             number = field.Result.Text
+            if chap is not None:
+                between = doc.Range(chap.Result.End + 1, field.Code.Start - 1).Text or ""
+                number = joined_number(chap.Result.Text, between, number)
+                warnings += chapter_warning(chap.Result.Text, chapter["level"])
     math = paragraph(doc, index).Range.OMaths.Item(1)
     math.Linearize()
     built = clean_text(paragraph(doc, index).Range.Text)
@@ -219,12 +251,20 @@ def _list_equations_impl():
     doc = backend.word.document()
     maths = doc.OMaths
     out = []
-    numbers = {}
+    numbers, chapters = {}, []
+    for f in doc.Fields:
+        code = (f.Code.Text or "").split()
+        if code and code[0].upper() == "STYLEREF":
+            chapters.append(f)
     for f in doc.Fields:
         code = (f.Code.Text or "").split()
         if code and code[0].upper() == "SEQ":
-            numbers.setdefault(f.Code.Start, (code[1] if len(code) > 1 else "",
-                                              f.Result.Text))
+            begin = f.Code.Start - 1
+            chap = next((c for c in chapters if 0 <= begin - (c.Result.End + 1) <= 3), None)
+            number = f.Result.Text if chap is None else joined_number(
+                chap.Result.Text, doc.Range(chap.Result.End + 1, begin).Text or "",
+                f.Result.Text)
+            numbers.setdefault(f.Code.Start, (code[1] if len(code) > 1 else "", number))
     for i in range(1, maths.Count + 1):
         m = maths.Item(i)
         rng = m.Range
@@ -380,7 +420,7 @@ def _set_inline_equation(doc, index, nth, linear):
 # -- Mac -------------------------------------------------------------------------------
 
 @mac_impl(_insert_equation_impl)
-def _mac_insert_equation(equation, fmt, numbered, sequence, after, before):
+def _mac_insert_equation(equation, fmt, numbered, sequence, after, before, chapter=None):
     from appscript import k
 
     from . import mac as m
@@ -389,7 +429,7 @@ def _mac_insert_equation(equation, fmt, numbered, sequence, after, before):
 
     linear = to_unicodemath(equation, fmt)
     insert = MAC_IMPLS[text._insert_paragraphs_impl.__name__]
-    written = insert([{"text": linear + (NUMBER_MARK if numbered else ""),
+    written = insert([{"text": linear + (number_mark(chapter) if numbered else ""),
                        "style": "Normal"}], after, before)
     index = written["inserted"][0]["index"]
     word = backend.word
@@ -422,18 +462,48 @@ def _mac_insert_equation(equation, fmt, numbered, sequence, after, before):
             warnings.append("The equation number could not be found to make it a field; "
                             "it stays (1).")
         else:
+            seq_text = sequence if not chapter else chapter_codes(
+                sequence, chapter["level"])[1].removeprefix("SEQ ")
             mac_with_active(app, doc, lambda: app.create_new_field(
                 text_range=doc.create_range(start=pos, end_=pos + 1),
-                field_type=k.field_sequence, field_text=sequence, preserve_formatting=False))
+                field_type=k.field_sequence, field_text=seq_text, preserve_formatting=False))
+            chap_at = None
+            if chapter:
+                # The chapter's "1" is the one before the count's field, whose
+                # begin mark now stands at `pos`.
+                read = lambda at: doc.create_range(start=at, end_=at + 1).content.get()  # noqa: E731
+                chap_at = _last_one(read, pos - 6, pos)
+                if chap_at is None:
+                    warnings.append("The chapter's place in the number could not be found; "
+                                    "the number counts without it.")
+                else:
+                    mac_with_active(app, doc, lambda: app.create_new_field(
+                        text_range=doc.create_range(start=chap_at, end_=chap_at + 1),
+                        field_type=k.field_empty,
+                        field_text=chapter_codes(sequence, chapter["level"])[0],
+                        preserve_formatting=False))
+            chap = None
             for j in range(1, int(doc.count(each=k.field)) + 1):
                 f = doc.fields[j]
                 code = (f.field_code.content.get() or "").split()
+                s0 = f.field_code.start_of_content.get()
+                if code and code[0].upper() == "STYLEREF" and chap_at is not None and \
+                        pstart <= s0 <= pstart + len(content) + 40:
+                    f.update_field()
+                    chap = f
                 if (len(code) >= 2 and code[0].upper() == "SEQ" and code[1] == sequence
                         and may_update(f.field_code.content.get())):
                     f.update_field()
                     s0 = f.field_code.start_of_content.get()
-                    if pstart <= s0 <= pstart + len(content) + 4:
+                    if pstart <= s0 <= pstart + len(content) + 40:
                         number = f.result_range.content.get()
+                        seq_begin = s0 - 1
+            if chap is not None and number is not None:
+                a = chap.result_range.end_of_content.get() + 1
+                between = doc.create_range(start=a, end_=seq_begin).content.get() \
+                    if seq_begin > a else ""
+                number = joined_number(chap.result_range.content.get(), between or "", number)
+                warnings += chapter_warning(chap.result_range.content.get(), chapter["level"])
     target.linearize()
     built = m._clean(doc.paragraphs[index].text_object.content.get())
     target.build_up()
@@ -453,14 +523,24 @@ def _mac_list_equations():
     from appscript import k
 
     doc = backend.word.document()
-    numbers = []
+    numbers, chapters, seqs = [], [], []
     for j in range(1, int(doc.count(each=k.field)) + 1):
         f = doc.fields[j]
         code = (f.field_code.content.get() or "").split()
-        if code and code[0].upper() == "SEQ":
-            numbers.append((f.field_code.start_of_content.get(),
-                            code[1] if len(code) > 1 else "",
-                            (f.result_range.content.get() or "").strip()))
+        if code and code[0].upper() == "STYLEREF":
+            chapters.append(f)
+        elif code and code[0].upper() == "SEQ":
+            seqs.append((f, code))
+    for f, code in seqs:
+        begin = f.field_code.start_of_content.get() - 1
+        count = (f.result_range.content.get() or "").strip()
+        chap = next((c for c in chapters
+                     if 0 <= begin - (c.result_range.end_of_content.get() + 1) <= 3), None)
+        if chap is not None:
+            a = chap.result_range.end_of_content.get() + 1
+            between = doc.create_range(start=a, end_=begin).content.get() if begin > a else ""
+            count = joined_number(chap.result_range.content.get(), between or "", count)
+        numbers.append((begin + 1, code[1] if len(code) > 1 else "", count))
     out = []
     for j in range(1, int(doc.count(each=k.math_object)) + 1):
         mo = doc.math_objects[j]
@@ -667,7 +747,8 @@ def register(mcp) -> None:
         """
         p = params
         return await call(_insert_equation_impl, p.equation, p.format, p.numbered,
-                          p.sequence, p.after, p.before, undo="Insert equation")
+                          p.sequence, p.after, p.before,
+                          p.chapter.model_dump() if p.chapter else None, undo="Insert equation")
 
     @mcp.tool(name="word_list_equations", annotations=annotations("List equations",
                                                                   READ_ONLY))
