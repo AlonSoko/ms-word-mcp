@@ -311,6 +311,8 @@ class FakeFind:
 
 
 class FakeRange:
+    StoryType = 1  # wdMainTextStory: the stand-in has no headers or footers
+
     def __init__(self, doc, start, end):
         self.doc = doc
         self.Start = start
@@ -887,6 +889,10 @@ class FakeDocument:
         self.Comments = FakeComments(self)
         # Lists of figures: none, unless a test adds them.
         self.TablesOfFigures = SimpleNamespace(Count=0, Item=lambda i: None)
+        # One section, whose headers and footers are not there (Exists False).
+        absent = SimpleNamespace(Item=lambda i: SimpleNamespace(Exists=False))
+        section = SimpleNamespace(Headers=absent, Footers=absent)
+        self.Sections = SimpleNamespace(Count=1, Item=lambda i: section)
         self.Hyperlinks = FakeHyperlinks()
         self.Bookmarks = FakeBookmarks()
         self.Name = name

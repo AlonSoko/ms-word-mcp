@@ -22,7 +22,7 @@ import difflib
 import os
 from typing import Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .. import backend
 from . import _props as P
@@ -283,10 +283,23 @@ class _Common(Input):
         "VBA bridge."))
 
 
+class HeaderFooterPlace(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    part: Literal["header", "footer"]
+    which: Literal["primary", "first", "even"] = Field("primary", description=(
+        "primary: every page; first or even: the first page's or the even pages' own, "
+        "once word_set_header_footer has given the section one."))
+    section: int = Field(1, ge=1)
+
+
 class _Made(_Position, _Wrap, _Common):
     index: int = Field(..., ge=1, description=(
         "The paragraph it is anchored to. It stays on that paragraph's page and is "
-        "deleted with it."))
+        "deleted with it. With `header_footer`, a paragraph of that header or footer."))
+    header_footer: HeaderFooterPlace | None = Field(None, description=(
+        "Put it in a header or footer instead of the body, as a logo or a line under the "
+        "header: it then shows on every page the header or footer is on."))
 
     @model_validator(mode="after")
     def _a_place_or_a_line(self):
@@ -456,6 +469,34 @@ def ungroup_answer(name: str, shapes: list[str], count: int) -> dict:
             "note": "The shapes are on their own again, each with the name it had in the group."}
 
 
+#: WdStoryType of a header or footer: where a shape anchored there is.
+HF_STORIES = {7: ("header", "primary"), 6: ("header", "even"), 10: ("header", "first"),
+              9: ("footer", "primary"), 8: ("footer", "even"), 11: ("footer", "first")}
+MAC_HF_STORIES = {"primary_header_story": ("header", "primary"),
+                  "even_pages_header_story": ("header", "even"),
+                  "first_page_header_story": ("header", "first"),
+                  "primary_footer_story": ("footer", "primary"),
+                  "even_pages_footer_story": ("footer", "even"),
+                  "first_page_footer_story": ("footer", "first")}
+HF_ORDER = list(HF_STORIES.values())
+NO_OWN_PART = ("Section {section} has no {which} {part} of its own: give it one with "
+               "word_set_header_footer (which=\"{which}\") first. Nothing was inserted.")
+HF_PARAGRAPH = ("The {which} {part} of section {section} has {count} paragraph(s), not "
+                "{index}. Nothing was inserted.")
+PICTURE_IN_HF_ON_MAC = (
+    "On the Mac a floating picture cannot be put in a header or footer yet: Word for "
+    "Mac's scripting makes a picture in line first, and has none in a header. A shape, "
+    "text box or line can; on Windows a picture can too. Nothing was inserted.")
+GROUP_IN_BODY = ("'{name}' is in a {part}: grouping is for shapes in the body of the "
+                 "document.")
+
+
+def hf_key(section: int, part: str, which: str, at: int) -> tuple:
+    """Where a header's or footer's shape comes in the list: after the body's,
+    by section, then header before footer, primary before even before first."""
+    return (section, HF_ORDER.index((part, which)), at)
+
+
 def spec_of(params: Input, *leave_out: str) -> dict:
     return params.model_dump(exclude_none=True, exclude=set(leave_out))
 
@@ -608,13 +649,76 @@ def _all_shapes(doc) -> list:
     return [doc.Shapes.Item(i) for i in range(1, doc.Shapes.Count + 1)]
 
 
+def _where(s) -> tuple | None:
+    """(part, which, section) of a shape in a header or footer; None in the body."""
+    anchor = s.Anchor
+    story = HF_STORIES.get(anchor.StoryType)
+    if story is None:
+        return None
+    return (*story, anchor.Sections.Item(1).Index)
+
+
+def _hf_shapes(doc) -> list:
+    """The shapes in headers and footers, in their order (hf_key). Word answers
+    every one of them in each header's and footer's Shapes: kept once."""
+    seen, found = set(), []
+    for n in range(1, doc.Sections.Count + 1):
+        sec = doc.Sections.Item(n)
+        for parts in (sec.Headers, sec.Footers):
+            for i in (1, 2, 3):
+                hf = parts.Item(i)
+                if not hf.Exists:
+                    continue
+                for j in range(1, hf.Shapes.Count + 1):
+                    s = hf.Shapes.Item(j)
+                    if s.ID in seen:
+                        continue
+                    where = _where(s)
+                    if where is not None:
+                        seen.add(s.ID)
+                        found.append((hf_key(where[2], where[0], where[1], s.Anchor.Start), s))
+    return [s for _, s in sorted(found, key=lambda x: x[0])]
+
+
+def _every_shape(doc) -> list:
+    return _all_shapes(doc) + _hf_shapes(doc)
+
+
 def _in_reading_order(doc) -> list:
-    return sorted(_all_shapes(doc), key=lambda s: s.Anchor.Start)
+    """The body's shapes in reading order, then those in headers and footers:
+    a shape put in a header does not change the body's numbers."""
+    return sorted(_all_shapes(doc), key=lambda s: s.Anchor.Start) + _hf_shapes(doc)
 
 
 def _check_name(doc, name) -> None:
-    if name is not None and any(s.Name == name for s in _all_shapes(doc)):
+    if name is not None and any(s.Name == name for s in _every_shape(doc)):
         raise ValueError(TAKEN.format(name=name))
+
+
+def _hf_of(doc, place: dict):
+    """The header or footer `place` names, checked to be there."""
+    from .page import _header_footer, _sections
+
+    _sections(doc, place["section"])
+    sec = doc.Sections.Item(place["section"])
+    ps = sec.PageSetup
+    if (place["which"] == "first" and not ps.DifferentFirstPageHeaderFooter) or \
+            (place["which"] == "even" and not ps.OddAndEvenPagesHeaderFooter):
+        raise ValueError(NO_OWN_PART.format(**place))
+    return _header_footer(sec, place["part"], place["which"])
+
+
+def _anchor(doc, index: int, spec: dict):
+    """(the Shapes to add to, the anchor's range) for a new shape: a paragraph of
+    the body, or of the header or footer `spec` names (taken out of it)."""
+    place = spec.pop("header_footer", None)
+    if place is None:
+        return doc.Shapes, paragraph(doc, index).Range
+    hf = _hf_of(doc, place)
+    paras = hf.Range.Paragraphs
+    if index > paras.Count:
+        raise ValueError(HF_PARAGRAPH.format(**place, count=paras.Count, index=index))
+    return hf.Shapes, paras.Item(index).Range
 
 
 def _find(doc, ref):
@@ -623,7 +727,7 @@ def _find(doc, ref):
         if ref > len(found):
             raise ValueError(OUT_OF_RANGE.format(number=ref, count=len(found)))
         return found[ref - 1]
-    found = [s for s in _all_shapes(doc) if s.Name == ref]
+    found = [s for s in _every_shape(doc) if s.Name == ref]
     if not found:
         raise ValueError(NOT_FOUND.format(name=ref))
     if len(found) > 1:
@@ -656,15 +760,27 @@ def _page_of(s) -> dict:
 def _describe(doc, s, number: int) -> dict:
     kind = _kind_of(s)
     wrap = s.WrapFormat
-    out = {"number": number, "name": s.Name, "kind": kind,
-           "index": doc.Range(0, s.Anchor.Start + 1).Paragraphs.Count,
-           "page": s.Anchor.Information(3),
+    where = _where(s)
+    out = {"number": number, "name": s.Name, "kind": kind}
+    if where is None:
+        out["index"] = doc.Range(0, s.Anchor.Start + 1).Paragraphs.Count
+        out["page"] = s.Anchor.Information(3)
+    else:
+        part, which, section = where
+        hf = _hf_of(doc, {"part": part, "which": which, "section": section})
+        at = s.Anchor.Start
+        paras = hf.Range.Paragraphs
+        out["index"] = next((i for i in range(1, paras.Count + 1)
+                             if paras.Item(i).Range.Start <= at < paras.Item(i).Range.End),
+                            paras.Count)
+        out["in"] = {"part": part, "which": which, "section": section}
+    out.update({
            "left": position_name(s.Left, NAMED_LEFT), "top": position_name(s.Top, NAMED_TOP),
            "width": round(s.Width, 2), "height": round(s.Height, 2),
            "horizontal_from": _name_for(HORIZONTAL, s.RelativeHorizontalPosition),
            "vertical_from": _name_for(VERTICAL, s.RelativeVerticalPosition),
            "wrap": _name_for(WRAPS, wrap.Type), "z": s.ZOrderPosition,
-           "rotation": round(s.Rotation, 2), "alt_text": s.AlternativeText or ""}
+           "rotation": round(s.Rotation, 2), "alt_text": s.AlternativeText or ""})
     if kind == "group":
         out["members"] = _members(s)
     if kind not in ("picture", "linked_picture", "group", "canvas", "smart_art", "chart"):
@@ -820,7 +936,8 @@ def _apply(s, spec: dict, kind: str) -> list[str]:
 
 
 def _result(doc, s, spec: dict, warnings: list[str]) -> dict:
-    follow(doc, s.Anchor)
+    if _where(s) is None:  # a header's anchor is not scrolled to: it is on every page
+        follow(doc, s.Anchor)
     # TextFrame.Overflowing is not asked: on Windows it answered True for an
     # empty shape and for two short lines with room to spare (docs/PROBES.md).
     return _finished(_describe(doc, s, _number_of(doc, s)), spec, _page_of(s), warnings, False)
@@ -848,8 +965,8 @@ def _new_spec(spec: dict, wrap: str) -> dict:
 def _insert_shape_impl(kind, index, width, height, spec):
     doc = backend.word.document()
     _check_name(doc, spec.get("name"))
-    anchor = paragraph(doc, index).Range
-    s = doc.Shapes.AddShape(KINDS[kind], 0, 0, width, height, anchor)
+    shapes, anchor = _anchor(doc, index, spec)
+    s = shapes.AddShape(KINDS[kind], 0, 0, width, height, anchor)
     full = _new_spec(spec, "square")
     return _finish_new(doc, s, full, kind)
 
@@ -857,8 +974,8 @@ def _insert_shape_impl(kind, index, width, height, spec):
 def _insert_text_box_impl(index, width, height, spec):
     doc = backend.word.document()
     _check_name(doc, spec.get("name"))
-    anchor = paragraph(doc, index).Range
-    s = doc.Shapes.AddTextbox(1, 0, 0, width, height, anchor)
+    shapes, anchor = _anchor(doc, index, spec)
+    s = shapes.AddTextbox(1, 0, 0, width, height, anchor)
     full = _new_spec(spec, "square")
     return _finish_new(doc, s, full, "text_box")
 
@@ -866,8 +983,8 @@ def _insert_text_box_impl(index, width, height, spec):
 def _insert_line_impl(index, begin_x, begin_y, end_x, end_y, spec):
     doc = backend.word.document()
     _check_name(doc, spec.get("name"))
-    anchor = paragraph(doc, index).Range
-    s = doc.Shapes.AddLine(begin_x, begin_y, end_x, end_y, anchor)
+    shapes, anchor = _anchor(doc, index, spec)
+    s = shapes.AddLine(begin_x, begin_y, end_x, end_y, anchor)
     full = {**_new_spec(spec, "front"), **line_endpoints(begin_x, begin_y, end_x, end_y)}
     return _finish_new(doc, s, full, "line")
 
@@ -891,8 +1008,14 @@ def _insert_floating_picture_impl(path, index, width, height, spec):
         raise ValueError(f"There is no file at '{path}'.")
     doc = backend.word.document()
     _check_name(doc, spec.get("name"))
-    start = paragraph(doc, index).Range.Start
-    inline = doc.InlineShapes.AddPicture(path, False, True, doc.Range(start, start))
+    in_hf = spec.get("header_footer") is not None
+    _, anchor = _anchor(doc, index, spec)
+    if in_hf:
+        at = anchor.Duplicate
+        at.Collapse(1)  # wdCollapseStart: the anchor's start, in the header's story
+    else:
+        at = doc.Range(anchor.Start, anchor.Start)
+    inline = doc.InlineShapes.AddPicture(path, False, True, at)
     warnings = _apply_picture(doc, inline, width, height, None, spec.get("alt_text"))
     s = inline.ConvertToShape()
     out = _finish_new(doc, s, _picture_spec(spec), "picture")
@@ -949,6 +1072,9 @@ def _members(s) -> list[str]:
 def _group_shapes_impl(shapes, name):
     doc = backend.word.document()
     found = [_find(doc, ref) for ref in shapes]
+    for x in found:
+        if _where(x) is not None:
+            raise ValueError(GROUP_IN_BODY.format(name=x.Name, part=_where(x)[0]))
     if len({x.ID for x in found}) != len(found):
         raise ValueError("A shape is named twice (by its name and by its number): give each "
                          "one once.")
@@ -982,7 +1108,7 @@ def _delete_shape_impl(shape):
     name, anchor = s.Name, s.Anchor
     follow(doc, anchor)
     s.Delete()
-    return {"success": True, "deleted": name, "left": doc.Shapes.Count}
+    return {"success": True, "deleted": name, "left": len(_every_shape(doc))}
 
 
 def leading_anchors(doc, start: int, end: int, hidden: int) -> int:
@@ -1018,8 +1144,90 @@ def _mac_in_reading_order(doc) -> list[str]:
     return sorted(found)
 
 
+def _mac_hf_shapes(doc) -> list[tuple]:
+    """(reference, name, (part, which, section)) of each shape in a header or
+    footer, in their order (hf_key). A header's `shapes` answers the shapes of
+    every header and footer, as on Windows: each is kept once, by where its
+    anchor is."""
+    from appscript import k
+
+    from . import mac as m
+    from .page import _mac_hf
+
+    seen, found = set(), []
+    for n in range(1, int(doc.count(each=k.section)) + 1):
+        sec = doc.sections[n]
+        ps = sec.page_setup
+        for part, which in HF_ORDER:
+            if (which == "first" and not ps.different_first_page_header_footer.get()) or \
+                    (which == "even" and not ps.odd_and_even_pages_header_footer.get()):
+                continue
+            hf = _mac_hf(sec, part, which)
+            for i in range(1, int(hf.count(each=k.shape)) + 1):
+                ref = hf.shapes[i]
+                story = MAC_HF_STORIES.get(m._name(ref.anchor.story_type.get()))
+                at = ref.anchor.start_of_content.get()
+                name = ref.name.get()
+                if story is None or (name, story, at) in seen:
+                    continue
+                seen.add((name, story, at))
+                found.append((hf_key(n, *story, at), hf.shapes[name], name, (*story, n)))
+    return [(ref, name, where) for _, ref, name, where in sorted(found, key=lambda x: x[0])]
+
+
+def _mac_all_names(doc) -> list[str]:
+    return _mac_names(doc) + [name for _, name, _ in _mac_hf_shapes(doc)]
+
+
+def _mac_shape(doc, name: str):
+    """A shape by its name, in the body or in a header or footer."""
+    if name in _mac_names(doc):
+        return doc.shapes[name]
+    for ref, have, _ in _mac_hf_shapes(doc):
+        if have == name:
+            return ref
+    raise ValueError(NOT_FOUND.format(name=name))
+
+
+def _mac_where(doc, name: str) -> tuple | None:
+    if name in _mac_names(doc):
+        return None
+    return next((where for _, have, where in _mac_hf_shapes(doc) if have == name), None)
+
+
+def _mac_ordered(doc) -> list[tuple]:
+    """(reference, name) of every shape, the body's in reading order first."""
+    return [(doc.shapes[place], name) for _, place, name in _mac_in_reading_order(doc)] + \
+        [(ref, name) for ref, name, _ in _mac_hf_shapes(doc)]
+
+
+def _mac_anchor(doc, index: int, spec: dict):
+    """The text a new shape is anchored to: a paragraph of the body, or of the
+    header or footer `spec` names (taken out of it)."""
+    from appscript import k
+
+    from . import mac as m
+    from .page import _mac_hf, _mac_sections
+
+    place = spec.pop("header_footer", None)
+    if place is None:
+        m._para(doc, index)
+        return doc.paragraphs[index].text_object
+    _mac_sections(doc, place["section"])
+    sec = doc.sections[place["section"]]
+    ps = sec.page_setup
+    if (place["which"] == "first" and not ps.different_first_page_header_footer.get()) or \
+            (place["which"] == "even" and not ps.odd_and_even_pages_header_footer.get()):
+        raise ValueError(NO_OWN_PART.format(**place))
+    text = _mac_hf(sec, place["part"], place["which"]).text_object
+    count = int(text.count(each=k.paragraph))
+    if index > count:
+        raise ValueError(HF_PARAGRAPH.format(**place, count=count, index=index))
+    return text.paragraphs[index].text_object
+
+
 def _mac_check_name(doc, name) -> None:
-    if name is not None and name in _mac_names(doc):
+    if name is not None and name in _mac_all_names(doc):
         raise ValueError(TAKEN.format(name=name))
 
 
@@ -1033,9 +1241,19 @@ def _mac_find(doc, ref):
     if isinstance(ref, int):
         found = _mac_in_reading_order(doc)
         if ref > len(found):
-            raise ValueError(OUT_OF_RANGE.format(number=ref, count=len(found)))
+            hf = _mac_hf_shapes(doc)
+            if ref > len(found) + len(hf):
+                raise ValueError(OUT_OF_RANGE.format(number=ref, count=len(found) + len(hf)))
+            shape, name, _ = hf[ref - len(found) - 1]
+            return shape, [n for _, n, _ in hf].count(name) == 1 and name not in names
         _, place, name = found[ref - 1]
     else:
+        if ref not in names:
+            hf = [(shape, n) for shape, n, _ in _mac_hf_shapes(doc) if n == ref]
+            if len(hf) == 1:
+                return hf[0][0], True
+            if len(hf) > 1:
+                raise ValueError(TWO_NAMES.format(count=len(hf), name=ref))
         count = names.count(ref)
         if not count:
             raise ValueError(NOT_FOUND.format(name=ref))
@@ -1048,13 +1266,13 @@ def _mac_find(doc, ref):
 
 
 def _mac_number_of(doc, name: str) -> int:
-    return next(n for n, (_, _, have) in enumerate(_mac_in_reading_order(doc), 1) if have == name)
+    return next(n for n, (_, have) in enumerate(_mac_ordered(doc), 1) if have == name)
 
 
 def _mac_made(doc, before: list[str], make):
     """Make a shape and find it by the name that was not there."""
     make()
-    new = [n for n in _mac_names(doc) if n not in before]
+    new = [n for n in _mac_all_names(doc) if n not in before]
     if len(new) != 1:
         raise RuntimeError("Word answered without error, but no new shape can be found. "
                            "Read the document back with word_list_shapes.")
@@ -1097,10 +1315,24 @@ def _mac_describe(doc, s, number: int) -> dict:
 
     kind = _mac_kind_of(s)
     anchor = s.anchor
-    page = anchor.get_range_information(information_type=k.active_end_page_number)
-    out = {"number": number, "name": s.name.get(), "kind": kind,
-           "index": m._index_at(doc, anchor.start_of_content.get()),
-           "page": int(page) if str(page).isdigit() else page,
+    name = s.name.get()
+    story = MAC_HF_STORIES.get(m._name(anchor.story_type.get()))
+    out = {"number": number, "name": name, "kind": kind}
+    if story is None:
+        page = anchor.get_range_information(information_type=k.active_end_page_number)
+        out["index"] = m._index_at(doc, anchor.start_of_content.get())
+        out["page"] = int(page) if str(page).isdigit() else page
+    else:
+        where = _mac_where(doc, name) or (*story, 1)
+        at = anchor.start_of_content.get()
+        from .page import _mac_hf
+
+        text = _mac_hf(doc.sections[where[2]], where[0], where[1]).text_object
+        count = int(text.count(each=k.paragraph))
+        out["index"] = next((i for i in range(1, count + 1)
+                             if text.paragraphs[i].text_object.end_of_content.get() > at), count)
+        out["in"] = {"part": where[0], "which": where[1], "section": where[2]}
+    out.update({
            "left": position_name(s.left_position.get(), NAMED_LEFT),
            "top": position_name(s.top.get(), NAMED_TOP),
            "width": round(s.width.get(), 2), "height": round(s.height.get(), 2),
@@ -1108,7 +1340,7 @@ def _mac_describe(doc, s, number: int) -> dict:
                                        _H_PREFIX),
            "vertical_from": _mac_key(_MAC_VERTICAL, s.relative_vertical_position.get(), _V_PREFIX),
            "wrap": _mac_key(WRAPS_MAC, s.wrap_format.wrap_type.get()),
-           "z": s.z_order_position.get(), "rotation": round(s.rotation_.get(), 2)}
+           "z": s.z_order_position.get(), "rotation": round(s.rotation_.get(), 2)})
     shape, _ = _mac_shape_remote(s)
     if shape is not None:  # Word for Mac's scripting cannot read it; VBA can
         try:
@@ -1314,9 +1546,10 @@ def _mac_cut_off(s) -> bool:
 def _mac_result(doc, name: str, spec: dict, warnings: list[str]) -> dict:
     from . import mac as m
 
-    s = doc.shapes[name]
-    at = s.anchor.start_of_content.get()
-    m._scroll(doc, at, at + 1)
+    s = _mac_shape(doc, name)
+    if _mac_where(doc, name) is None:  # a header's anchor is not scrolled to
+        at = s.anchor.start_of_content.get()
+        m._scroll(doc, at, at + 1)
     kind = _mac_kind_of(s)
     # `has text` is true for an empty shape on the Mac, and `overflowing` too.
     overflowing = (kind not in NO_TEXT and s.text_frame.overflowing.get() is True
@@ -1329,9 +1562,9 @@ def _mac_result(doc, name: str, spec: dict, warnings: list[str]) -> dict:
 def _mac_finish_new(doc, name: str, spec: dict, kind: str) -> dict:
     """Give a new shape its place and look. If that fails no half-made shape stays."""
     try:
-        warnings = _mac_apply(doc.shapes[name], spec, kind)
+        warnings = _mac_apply(_mac_shape(doc, name), spec, kind)
     except Exception:
-        doc.shapes[name].delete()
+        _mac_shape(doc, name).delete()
         raise
     return _mac_result(doc, spec.get("name", name), spec, warnings)
 
@@ -1343,12 +1576,12 @@ def _mac_insert_shape(kind, index, width, height, spec):
     from . import mac as m
 
     doc = backend.word.document()
-    m._para(doc, index)
     _mac_check_name(doc, spec.get("name"))
-    name = _mac_made(doc, _mac_names(doc), lambda: doc.make(
+    anchor = _mac_anchor(doc, index, spec)
+    name = _mac_made(doc, _mac_all_names(doc), lambda: doc.make(
         new=k.shape, at=doc, with_properties={
             k.auto_shape_type: _mac_kind(kind), k.left_position: 0, k.top: 0, k.width: width,
-            k.height: height, k.anchor: doc.paragraphs[index].text_object}))
+            k.height: height, k.anchor: anchor}))
     return _mac_finish_new(doc, name, _new_spec(spec, "square"), kind)
 
 
@@ -1359,12 +1592,12 @@ def _mac_insert_text_box(index, width, height, spec):
     from . import mac as m
 
     doc = backend.word.document()
-    m._para(doc, index)
     _mac_check_name(doc, spec.get("name"))
-    name = _mac_made(doc, _mac_names(doc), lambda: doc.make(
+    anchor = _mac_anchor(doc, index, spec)
+    name = _mac_made(doc, _mac_all_names(doc), lambda: doc.make(
         new=k.text_box, at=doc, with_properties={
             k.left_position: 0, k.top: 0, k.width: width, k.height: height,
-            k.anchor: doc.paragraphs[index].text_object}))
+            k.anchor: anchor}))
     return _mac_finish_new(doc, name, _new_spec(spec, "square"), "text_box")
 
 
@@ -1375,12 +1608,12 @@ def _mac_insert_line(index, begin_x, begin_y, end_x, end_y, spec):
     from . import mac as m
 
     doc = backend.word.document()
-    m._para(doc, index)
     _mac_check_name(doc, spec.get("name"))
-    name = _mac_made(doc, _mac_names(doc), lambda: doc.make(
+    anchor = _mac_anchor(doc, index, spec)
+    name = _mac_made(doc, _mac_all_names(doc), lambda: doc.make(
         new=k.line_shape, at=doc, with_properties={
             k.begin_line_X: begin_x, k.begin_line_Y: begin_y, k.end_line_X: end_x,
-            k.end_line_Y: end_y, k.anchor: doc.paragraphs[index].text_object}))
+            k.end_line_Y: end_y, k.anchor: anchor}))
     full = {**_new_spec(spec, "front"), **line_endpoints(begin_x, begin_y, end_x, end_y)}
     return _mac_finish_new(doc, name, full, "line")
 
@@ -1401,6 +1634,8 @@ def _mac_insert_floating_picture(path, index, width, height, spec):
 
     if not os.path.isfile(path):
         raise ValueError(f"There is no file at '{path}'.")
+    if spec.pop("header_footer", None) is not None:
+        raise ValueError(PICTURE_IN_HF_ON_MAC)
     doc = backend.word.document()
     m._para(doc, index)
     _mac_check_name(doc, spec.get("name"))
@@ -1430,10 +1665,10 @@ def _mac_insert_floating_picture(path, index, width, height, spec):
 @mac_impl(_list_shapes_impl)
 def _mac_list_shapes(start, limit):
     doc = backend.word.document()
-    found = _mac_in_reading_order(doc)
+    found = _mac_ordered(doc)
     out = {"success": True, "count": len(found), "shapes": [
-        _mac_describe(doc, doc.shapes[place], n)
-        for n, (_, place, _name) in enumerate(found, 1) if start <= n < start + limit]}
+        _mac_describe(doc, ref, n)
+        for n, (ref, _name) in enumerate(found, 1) if start <= n < start + limit]}
     if start + limit <= len(found):
         out["more"] = (f"Shapes {start + limit} to {len(found)} follow; "
                        f"pass start={start + limit}.")
@@ -1464,8 +1699,8 @@ def _mac_picture_in_line(doc, s, name: str, spec: dict, kind: str):
     rest = {key: v for key, v in spec.items() if key not in ("wrap", "wrap_side", "wrap_distance")}
     warnings = _mac_apply(s, rest, kind)
     name = rest.get("name", name)
-    at = doc.shapes[name].anchor.start_of_content.get()
-    doc.shapes[name].convert_to_inline_shape()
+    at = _mac_shape(doc, name).anchor.start_of_content.get()
+    _mac_shape(doc, name).convert_to_inline_shape()
     count = int(doc.count(each=k.inline_shape))
     number = next(n for n in range(1, count + 1)
                   if doc.inline_shapes[n].text_object.start_of_content.get() >= at)
@@ -1503,6 +1738,9 @@ def _mac_group_shapes(shapes, name):
     for ref in shapes:
         s, own_name = _mac_find(doc, ref)
         have = s.name.get()
+        where = _mac_where(doc, have)
+        if where is not None:
+            raise ValueError(GROUP_IN_BODY.format(name=have, part=where[0]))
         if not own_name:
             raise ValueError(TWO_NAMES.format(count=_mac_names(doc).count(have), name=have))
         names.append(have)
@@ -1548,7 +1786,7 @@ def _mac_delete_shape(shape):
     s, _ = _mac_find(doc, shape)
     name = s.name.get()
     s.delete()
-    return {"success": True, "deleted": name, "left": int(doc.count(each=k.shape))}
+    return {"success": True, "deleted": name, "left": len(_mac_all_names(doc))}
 
 
 def mac_leading_anchors(doc, start: int, end: int, hidden: int) -> int:

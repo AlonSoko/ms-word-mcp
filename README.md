@@ -189,7 +189,7 @@ Every member and constant is checked against Microsoft's documentation ([docs/re
 
 ### 🖼️ Shapes and Floating Pictures
 
-`word_insert_shape`, `word_insert_text_box`, `word_insert_line` and `word_insert_floating_picture` add objects with text wrapping, position, layer order, fill, line and text. `word_set_shape` changes them afterwards, crops and fades pictures, and moves a picture between floating and in line.
+`word_insert_shape`, `word_insert_text_box`, `word_insert_line` and `word_insert_floating_picture` add objects with text wrapping, position, layer order, fill, line and text. `word_set_shape` changes them afterwards, crops and fades pictures, and moves a picture between floating and in line. With `header_footer` they go in a header or footer instead, as a logo or a rule on every page (on the Mac, shapes, text boxes and lines; a floating picture there is Windows only).
 
 ### 📄 Seeing a Page
 

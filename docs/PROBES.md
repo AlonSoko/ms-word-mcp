@@ -494,3 +494,16 @@ repeats it.
 | Read back | In Word's math letters (𝐸=𝑚𝑐^2), as display equations |
 | `word_get_paragraphs` on a paragraph with a built-up equation | Its structure shows as paragraph marks inside the text (𝑚\r1\r), as for display equations |
 
+## Shapes in headers and footers (Word 16, both platforms)
+
+Measured 2026-11-20; `run_header_shape_steps` in `scripts/live_check.py`
+repeats it.
+
+| What | Windows | Mac |
+|---|---|---|
+| Making a shape | `HeaderFooter.Shapes.AddShape(..., anchor)` with a header paragraph's range as the anchor | `make new shape` with a header paragraph's text as its `anchor`; where it is made (`at`) does not matter, the anchor puts it in the header |
+| The document's shapes | Leave out those in headers and footers | The same: `count shapes` of the document was 0 with two in the header |
+| A header's or footer's shapes | Every header's and footer's, whichever is asked | The same, through `header footer`'s `shape` elements |
+| Where a shape is | `Anchor.StoryType` (7 primary header, 9 primary footer...) and `Anchor.Sections(1)` | `anchor`'s `story type` (`primary header story`...) |
+| A floating picture | Made in line at the header paragraph, then `ConvertToShape` | Not done: the picture is made in line first, and `header footer` has no inline shapes |
+

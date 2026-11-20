@@ -288,6 +288,7 @@ def run_steps(path: str) -> None:
     run_link_steps()
     run_shape_steps()
     run_group_steps()
+    run_header_shape_steps()
     run_floating_picture_steps(Path(path).parent)
     run_safety_steps(Path(path).parent)
     step("picture of page 1", screen._get_page_image_impl, 1, None,
@@ -2006,6 +2007,75 @@ def run_inline_equation_steps() -> None:
         step("a picture of the page", screen._get_page_image_impl, 1, None,
              check=lambda o: o.get("page") == 1)
         step("close the document for inline equations", documents._close_document_impl, False)
+    finally:
+        call_document.reset(token)
+
+
+def run_header_shape_steps() -> None:
+    """Shapes in headers and footers."""
+    other = step("a document for header shapes", documents._create_document_impl, None, None)
+    if "error" in other:
+        return
+    token = call_document.set(other["full_name"])
+    try:
+        made = step("a paragraph of body text", text._insert_paragraphs_impl,
+                    [{"text": "Body text.", "style": "Normal"}], None, None)
+        if "error" in made:
+            return
+        step("a header", page._set_header_footer_impl, "header", "Company", "primary", 1, None,
+             None, undo="Set header or footer")
+        step("a shape in the body", shapes._insert_shape_impl, "rectangle", 1, 80.0, 40.0,
+             {"name": "Box", "left": 0.0, "top": 20.0}, undo="Insert shape",
+             check=lambda o: o.get("number") == 1 and "in" not in o)
+        step("a shape in the header", shapes._insert_shape_impl, "oval", 1, 60.0, 30.0,
+             {"name": "Logo", "left": 380.0, "top": 0.0,
+              "header_footer": {"part": "header", "which": "primary", "section": 1}},
+             undo="Insert shape",
+             check=lambda o: o.get("in") == {"part": "header", "which": "primary", "section": 1}
+             and o.get("name") == "Logo" and o.get("index") == 1)
+        step("a line in the footer", shapes._insert_line_impl, 1, 0.0, 0.0, 300.0, 0.0,
+             {"name": "Rule", "header_footer": {"part": "footer", "which": "primary",
+                                                "section": 1}},
+             undo="Insert line",
+             check=lambda o: (o.get("in") or {}).get("part") == "footer")
+        step("all three listed, the body's first", shapes._list_shapes_impl, 1, 50,
+             check=lambda o: [(x["name"], (x.get("in") or {}).get("part")) for x in o["shapes"]]
+             == [("Box", None), ("Logo", "header"), ("Rule", "footer")])
+        step("the header's shape moved", shapes._set_shape_impl, "Logo", {"dleft": 20.0},
+             undo="Change shape", check=lambda o: o.get("left") == 400.0 and "in" in o)
+        step("the header's shape by its number", shapes._set_shape_impl, 2, {"fill": "#C00000"},
+             undo="Change shape", check=lambda o: o.get("name") == "Logo"
+             and o.get("fill") == "#C00000")
+        step("a header paragraph that is not there", shapes._insert_shape_impl, "oval", 5, 20.0,
+             20.0, {"header_footer": {"part": "header", "which": "primary", "section": 1}},
+             check=lambda o: "not 5" in o.get("error", ""))
+        step("a first-page header the section does not have", shapes._insert_shape_impl, "oval",
+             1, 20.0, 20.0, {"header_footer": {"part": "header", "which": "first", "section": 1}},
+             check=lambda o: "word_set_header_footer" in o.get("error", ""))
+        step("a header's shape is not grouped with the body's", shapes._group_shapes_impl,
+             ["Box", "Logo"], None, check=lambda o: "grouping is for shapes in the body"
+             in o.get("error", ""))
+        step("a picture of the page", screen._get_page_image_impl, 1, None,
+             check=lambda o: o.get("page") == 1)
+        step("the header's shape deleted", shapes._delete_shape_impl, "Logo",
+             undo="Delete shape", check=lambda o: o.get("left") == 2)
+        step("two left", shapes._list_shapes_impl, 1, 50,
+             check=lambda o: [x["name"] for x in o["shapes"]] == ["Box", "Rule"])
+        picture = Path(tempfile.mkdtemp()) / "live-header-picture.png"
+        picture.write_bytes(screen.png(60, 30, [b"\x40\x80\xc0" * 60] * 30))
+        in_header = {"part": "header", "which": "primary", "section": 1}
+        if backend.IS_MACOS:
+            step("a floating picture in the header is refused on the Mac, saying why",
+                 shapes._insert_floating_picture_impl, str(picture), 1, 40.0, None,
+                 {"header_footer": in_header},
+                 check=lambda o: "On the Mac a floating picture" in o.get("error", ""))
+        else:
+            step("a floating picture in the header", shapes._insert_floating_picture_impl,
+                 str(picture), 1, 40.0, None,
+                 {"name": "Mark", "left": 200.0, "top": 0.0, "header_footer": in_header},
+                 undo="Insert floating picture",
+                 check=lambda o: o.get("kind") == "picture" and o.get("in") == in_header)
+        step("close the document for header shapes", documents._close_document_impl, False)
     finally:
         call_document.reset(token)
 

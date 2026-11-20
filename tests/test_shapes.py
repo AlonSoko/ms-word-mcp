@@ -459,3 +459,22 @@ def test_ungrouping_says_which_shapes_came_out():
     out = shapes.ungroup_answer("Pair", ["A", "B"], 3)
     assert (out["ungrouped"], out["shapes"], out["count"]) == ("Pair", ["A", "B"], 3)
     assert "not a group" in shapes.NOT_A_GROUP.format(name="C", kind="line")
+
+
+def test_shapes_in_headers_and_footers_come_after_the_bodys_in_their_order():
+    keys = [shapes.hf_key(2, "header", "primary", 0), shapes.hf_key(1, "footer", "primary", 5),
+            shapes.hf_key(1, "header", "first", 0), shapes.hf_key(1, "header", "primary", 9)]
+    assert sorted(keys) == [keys[3], keys[2], keys[1], keys[0]]
+
+
+def test_a_place_in_a_header_or_footer_is_checked():
+    from pydantic import ValidationError
+
+    made = shapes.InsertShapeInput(kind="oval", index=1, width=10, height=10,
+                                   header_footer={"part": "footer"})
+    assert made.header_footer.which == "primary" and made.header_footer.section == 1
+    assert shapes.spec_of(made, "kind", "index", "width", "height")["header_footer"] == {
+        "part": "footer", "which": "primary", "section": 1}
+    with pytest.raises(ValidationError):
+        shapes.InsertShapeInput(kind="oval", index=1, width=10, height=10,
+                                header_footer={"part": "side"})
