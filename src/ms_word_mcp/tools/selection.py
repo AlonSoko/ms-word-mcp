@@ -12,6 +12,7 @@ https://learn.microsoft.com/en-us/office/vba/api/word.wdstorytype
 from __future__ import annotations
 
 from .. import backend
+from ..backend.com import names_of
 from ._common import READ_ONLY, Input, annotations, call, mac_impl
 from ._word import clean_text
 
@@ -91,8 +92,8 @@ def _get_selection_impl():
     story = STORIES.get(sel.StoryType, "other")
     paragraphs = (_paragraphs(lambda at: doc.Range(0, at).Paragraphs.Count, start, end)
                   if story == "main" else None)
-    return selection_answer(doc.Name, doc.FullName, story, start, end, sel.Range.Text,
-                            paragraphs, _target_full_name(lambda d: d.FullName))
+    return selection_answer(*names_of(doc), story, start, end, sel.Range.Text,
+                            paragraphs, _target_full_name(lambda d: names_of(d)[1]))
 
 
 @mac_impl(_get_selection_impl)

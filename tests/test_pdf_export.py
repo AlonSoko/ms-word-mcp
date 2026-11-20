@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
+from ms_word_mcp.backend import com
 from ms_word_mcp.tools import documents, mac, screen
 
 
@@ -33,6 +34,10 @@ def test_the_pages_are_checked_against_the_document():
 
 # -- Windows, against a stand-in document ----------------------------------------------
 
+def _window(caption):
+    return SimpleNamespace(Count=1, Item=lambda i: SimpleNamespace(Caption=caption))
+
+
 @pytest.fixture
 def com_doc(monkeypatch, tmp_path):
     exported = []
@@ -41,8 +46,8 @@ def com_doc(monkeypatch, tmp_path):
         exported.append(kwargs)
         open(kwargs["OutputFileName"], "wb").write(b"%PDF")
 
-    doc = SimpleNamespace(FullName="C:\\d\\Report.docx", ExportAsFixedFormat=export,
-                          ComputeStatistics=lambda kind: 5)
+    doc = SimpleNamespace(Name="Report.docx", FullName="C:\\d\\Report.docx", ExportAsFixedFormat=export,
+                          ComputeStatistics=lambda kind: 5, Windows=_window("Document1"))
     monkeypatch.setattr(documents.backend, "word", SimpleNamespace(document=lambda: doc))
     return exported, str(tmp_path / "out.pdf")
 
@@ -67,6 +72,30 @@ def test_on_windows_a_page_that_is_not_there_is_refused_before_exporting(com_doc
     with pytest.raises(ValueError, match="There is no page 9"):
         documents._save_document_as_impl(path, False, 9, None, False)
     assert exported == [] and not os.path.exists(path)
+
+
+def test_on_windows_the_answer_names_the_document_word_has_just_lost_the_name_of(com_doc, monkeypatch):
+    exported, path = com_doc
+    doc = documents.backend.word.document()
+    real = doc.ExportAsFixedFormat
+
+    def export(**kwargs):
+        real(**kwargs)
+        doc.Name = doc.FullName = ""  # what Word does to a document never saved
+    doc.Name, doc.FullName = "Document1", "Document1"
+    doc.ExportAsFixedFormat = export
+    assert documents._save_document_as_impl(path, True)["document"] == "Document1"
+    doc.Name = ""  # Word has lost both now; the window's caption still says it
+    assert documents._save_document_as_impl(path, True)["document"] == "Document1"
+
+
+def test_a_document_word_answers_no_name_for_goes_by_its_windows_caption():
+    lost = SimpleNamespace(Name="", FullName="", Windows=_window("Document1"))
+    assert com.names_of(lost) == ("Document1", "Document1")
+    saved = SimpleNamespace(Name="a.docx", FullName="C:\\d\\a.docx", Windows=_window("a.docx"))
+    assert com.names_of(saved) == ("a.docx", "C:\\d\\a.docx")
+    windowless = SimpleNamespace(Name="", FullName="", Windows=SimpleNamespace(Count=0))
+    assert com.names_of(windowless) == ("", "")
 
 
 # -- Mac, against stand-ins ------------------------------------------------------------
@@ -141,3 +170,9 @@ def test_on_the_mac_pages_are_copied_out_of_a_pdf(tmp_path):
     part = tmp_path / "part.pdf"
     mac.keep_pdf_pages(str(whole), str(part), (2, 3))
     assert mac.pdf_page_count(str(part)) == 2
+
+
+def test_a_document_that_lost_its_name_is_still_named_in_answers():
+    lost = SimpleNamespace(Name="", FullName="", Saved=False, ReadOnly=False, Windows=_window("Document1"))
+    summary = documents._doc_summary(lost)
+    assert (summary["name"], summary["full_name"]) == ("Document1", "Document1")

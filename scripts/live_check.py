@@ -831,7 +831,7 @@ def run_pdf_steps() -> None:
                                                and "REVIEWNOTE" not in _pdf_text(whole))))
         marked = os.path.join(folder, f"ms-word-mcp-markup-{stamp}.pdf")
         step("a PDF with its comments drawn", documents._save_document_as_impl, marked, True, None, None,
-             True, check=lambda o: o["markup"] is True
+             True, check=lambda o: o["markup"] is True and o["document"] == other["full_name"]
              and (_pdf_text(marked) is None or "REVIEWNOTE" in _pdf_text(marked)))
         part = os.path.join(folder, f"ms-word-mcp-pages-{stamp}.pdf")
         step("pages two to three", documents._save_document_as_impl, part, True, 2, 3, False,

@@ -8,6 +8,7 @@ import os
 from pydantic import Field, field_validator, model_validator
 
 from .. import backend
+from ..backend.com import names_of
 from ._common import READ_ONLY, WRITES, DESTRUCTIVE, Input, Trimmed, annotations, call, local_path
 
 # WdSaveFormat values for the formats save-as takes, by file extension.
@@ -16,7 +17,8 @@ SAVE_FORMATS = {".docx": 16, ".docm": 13, ".dotx": 14, ".doc": 0, ".rtf": 6,
 
 
 def _doc_summary(doc) -> dict:
-    return {"name": doc.Name, "full_name": doc.FullName, "saved": bool(doc.Saved),
+    name, full_name = names_of(doc)
+    return {"name": name, "full_name": full_name, "saved": bool(doc.Saved),
             "read_only": bool(doc.ReadOnly)}
 
 
@@ -36,7 +38,7 @@ def _get_app_info_impl():
     active = None
     if docs:
         try:
-            active = app.ActiveDocument.FullName
+            active = names_of(app.ActiveDocument)[1]
         except Exception:  # noqa: BLE001 - Word has no active document
             active = None
     return {
@@ -179,7 +181,7 @@ def _save_document_impl():
     doc = backend.word.document()
     if not doc.Path:
         raise ValueError(
-            f"'{doc.Name}' has never been saved, so it has no file to save to. "
+            f"'{names_of(doc)[0]}' has never been saved, so it has no file to save to. "
             "Use word_save_document_as with a full path.")
     doc.Save()
     return {"success": True, **_doc_summary(doc)}
@@ -244,6 +246,7 @@ def _save_document_as_impl(path: str, overwrite: bool, from_page=None, to_page=N
         raise ValueError(f"The folder '{folder}' does not exist.")
     doc = backend.word.document()
     ext = os.path.splitext(path)[1].lower()
+    own = names_of(doc)[1]  # before the export: a document never saved loses its name there
     pages = None
     if ext == ".pdf":
         from ._word import WD_STATISTIC_PAGES
@@ -258,7 +261,7 @@ def _save_document_as_impl(path: str, overwrite: bool, from_page=None, to_page=N
     if not os.path.exists(path):
         raise RuntimeError(f"Word answered without error, but there is no file at '{path}'.")
     result = {"success": True, "path": path, "bytes": os.path.getsize(path),
-              "document": doc.FullName}
+              "document": doc.FullName if ext != ".pdf" else own}
     if ext == ".pdf":
         result["markup"] = markup
         if pages is not None:
@@ -275,7 +278,7 @@ class CloseDocumentInput(Input):
 def _close_document_impl(save: bool | None):
     word = backend.word
     doc = word.document()
-    name, full_name = doc.Name, doc.FullName
+    name, full_name = names_of(doc)
     if save is None and not doc.Saved:
         raise ValueError(
             f"'{name}' has unsaved changes. Pass save=true to save them or save=false "

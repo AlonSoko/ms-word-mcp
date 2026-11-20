@@ -22,6 +22,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .. import backend
+from ..backend.com import names_of
 from ._common import READ_ONLY, WRITES, Input, annotations, call, error_text, follow, mac_impl, mac_with_active
 from ._word import (
     ALIGNMENTS, ALIGNMENT_NAMES, clean_text, locate_spans, paragraph, paragraph_info,
@@ -486,7 +487,7 @@ def _add_ruby_impl(index, spans, alignment, size):
                 else:
                     target.PhoneticGuide(span["ruby"], RUBY_ALIGNMENTS[alignment], 0, size)
         finally:
-            if was is not None and was.FullName != doc.FullName:
+            if was is not None and names_of(was)[1] != names_of(doc)[1]:
                 was.Activate()
     p = paragraph(doc, index)
     follow(doc, p.Range)
