@@ -621,6 +621,10 @@ def run_comment_steps() -> None:
              check=lambda o: [(c["number"], c["index"], c["on"], c["text"]) for c in o["comments"]]
              == [(1, 1, "beta", "Which beta?"), (2, 2, "日本語の本文 𠮷 です。", "コメント 𠮷")]
              and all(c["date"] for c in o["comments"]))
+        step("a picture of the page with its comments", screen._get_page_image_impl, 1, None,
+             check=lambda o: o.get("width") == 1200 and os.path.getsize(o["path"]) > 5000)
+        step("and the comments are all still there", comments._list_comments_impl, 1, 100,
+             check=lambda o: o["count"] == 2)
         step("one comment at a time says what follows", comments._list_comments_impl, 1, 1,
              check=lambda o: len(o["comments"]) == 1 and "start=2" in o["more"])
         step("text that is not there is refused", comments._add_comment_impl, 1, "no", "nowhere",

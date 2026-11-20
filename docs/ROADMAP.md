@@ -90,6 +90,9 @@ follows what the owner asked for in ykuwai/ppt-mcp#352 and since.
 - The page: paper, margins, columns, document grid, vertical text; section
   breaks; headers and footers, of one paragraph or several, and page numbers;
   ruby.
+- A picture of a page as it will print, on both platforms: with comments and
+  tracked changes too, which Word for Mac's PDF would draw beside a page shrunk
+  to two thirds.
 
 - Tables: insert one filled with its cells (style, heading rows, grid
   lines, column widths and alignments, autofit, position), list and read
@@ -132,7 +135,6 @@ Then, ordered roughly by what the owner stressed.
    edits in a second window.
 7. Shapes, the rest. Grouping; shapes in headers and footers; moving a shape to
    another paragraph.
-8. Page previews.
 
 ## Platforms
 
