@@ -330,6 +330,20 @@ class FakeRange:
         self.End = self.Start + len(value)
 
     @property
+    def LanguageID(self):
+        """The text's language; 9999999 (wdUndefined) when it holds more than one."""
+        found = {a.get("language", 1033) for a in self.doc.attrs[self.Start:self.End]}
+        return found.pop() if len(found) == 1 else 9999999
+
+    @LanguageID.setter
+    def LanguageID(self, value):
+        for a in self.doc.attrs[self.Start:self.End]:
+            a["language"] = value
+
+    def GetSpellingSuggestions(self):
+        return [SimpleNamespace(Name=s) for s in self.doc.suggestions.get(self.Text, [])]
+
+    @property
     def Document(self):
         return self.doc
 
@@ -1106,6 +1120,21 @@ FakeDocument.ListTemplates = property(
 FakeRange.OMaths = property(lambda self: SimpleNamespace(Count=0))
 # No tables in a fake document.
 FakeDocument.Tables = property(lambda self: SimpleNamespace(Count=0))
+
+
+def _errors(doc, spans):
+    """Word's list of errors: each a range of the text."""
+    items = [FakeRange(doc, a, b) for a, b in spans]
+    return SimpleNamespace(Count=len(items), Item=lambda i: items[i - 1])
+
+
+# Spelling and grammar errors as (start, end) spans, set by a test, and the
+# suggestions for a misspelled word.
+FakeDocument.spelling_spans = ()
+FakeDocument.grammar_spans = ()
+FakeDocument.suggestions = {}
+FakeDocument.SpellingErrors = property(lambda self: _errors(self, self.spelling_spans))
+FakeDocument.GrammaticalErrors = property(lambda self: _errors(self, self.grammar_spans))
 
 
 def _cross_reference_items(self, kind):

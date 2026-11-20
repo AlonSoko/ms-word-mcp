@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from ms_word_mcp import backend  # noqa: E402
 from ms_word_mcp.backend import call_document  # noqa: E402
 from ms_word_mcp.tools import (  # noqa: E402
-    _common, comments, documents, edit, equations, fields, formatting, links, lists, notes, page,
+    _common, checks, comments, documents, edit, equations, fields, formatting, links, lists, notes, page,
     references, revisions, screen, shapes, tables, text)
 
 results: list[tuple[str, bool]] = []
@@ -263,6 +263,7 @@ def run_steps(path: str) -> None:
     run_border_steps()
     run_note_steps()
     run_comment_steps()
+    run_check_steps()
     run_revision_steps()
     run_link_steps()
     run_shape_steps()
@@ -645,6 +646,41 @@ def run_comment_steps() -> None:
              check=lambda o: [p["text"] for p in o["paragraphs"]]
              == ["Alpha beta gamma.", "日本語の本文 𠮷 です。"])
         step("close the document of comments", documents._close_document_impl, False)
+    finally:
+        call_document.reset(token)
+
+
+def run_check_steps() -> None:
+    """Spelling in the language the text is marked with, and the health check."""
+    other = step("a document for checks", documents._create_document_impl, None, None)
+    if "error" in other:
+        return
+    token = call_document.set(other["full_name"])
+    try:
+        made = step("paragraphs with slips", text._insert_paragraphs_impl,
+                    [{"text": "Thiss sentense has erors.", "style": "Normal"},
+                     {"text": "TODO: write the the end.", "style": "Normal"},
+                     {"text": "", "style": "Normal"}, {"text": "", "style": "Normal"},
+                     {"text": "日本語の本文です。", "style": "Normal"}], None, None)
+        if "error" in made:
+            return
+        before = step("the language the text is checked in", checks._check_spelling_impl, 50)
+        print(f"      (marked as {before.get('language')} before word_set_language)")
+        step("marked as English", checks._set_language_impl, "english_us", 1, 4,
+             undo="Set language", check=lambda o: (o["language"], o["start"], o["end"])
+             == ("english_us", 1, 4))
+        step("the misspelled words, with their paragraphs", checks._check_spelling_impl, 50,
+             check=lambda o: {"Thiss", "sentense", "erors"} <= {w["word"] for w in o["misspelled"]}
+             and all(w["paragraphs"] == [1] for w in o["misspelled"] if w["word"] in ("Thiss", "erors"))
+             and o["language"] in ("english_us", "mixed"))
+        step("the Japanese paragraph is marked Japanese", checks._set_language_impl, "japanese", 5,
+             None, undo="Set language", check=lambda o: o["language"] == "japanese")
+        step("a span that is not there is refused", checks._set_language_impl, "japanese", 1, 99,
+             check=lambda o: "not all in the document" in o["error"])
+        step("the health check finds the slips", checks._check_document_impl, 100,
+             check=lambda o: {"placeholder", "repeated_word", "blank_paragraphs"} <= set(o["counts"])
+             and o["paragraphs"] == 5)
+        step("close the document of checks", documents._close_document_impl, False)
     finally:
         call_document.reset(token)
 

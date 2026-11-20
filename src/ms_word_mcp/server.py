@@ -257,6 +257,14 @@ is accepted. `word_list_revisions` lists the changes;
 `word_accept_revisions` and `word_reject_revisions` take their numbers, which
 move after each call, or `every`.
 
+## Before sending
+
+`word_check_document` lists what to fix before a document goes out: skipped
+heading levels, placeholders, pictures without alt text, comments and tracked
+changes left, and more. `word_check_spelling` gives Word's spelling and grammar
+findings and the language the text is checked in; text marked with a language
+Word has no dictionary for is never checked, and `word_set_language` fixes that.
+
 ## Comments
 
 `word_add_comment` puts a comment on a paragraph, or on some text in it
@@ -305,11 +313,11 @@ mainly Latin document. East Asian layouts measure spacing in grid lines
 mcp = WordServer("ms_word_mcp", lifespan=app_lifespan, instructions=INSTRUCTIONS)
 
 from .tools import (  # noqa: E402,F401 - mac registers the Mac halves
-    comments, documents, edit, equations, fields, formatting, links, lists, mac, notes, page, references,
-    revisions, screen, shapes, tables, text, view)
+    checks, comments, documents, edit, equations, fields, formatting, links, lists, mac, notes, page,
+    references, revisions, screen, shapes, tables, text, view)
 
 for module in (documents, text, formatting, lists, tables, references, shapes, notes, links, equations,
-               fields, revisions, comments, page, view, screen, edit):
+               fields, revisions, comments, checks, page, view, screen, edit):
     module.register(mcp)
 
 
@@ -423,6 +431,7 @@ AREAS = {"documents": "Documents", "text": "Reading and writing text",
          "page": "The page: setup, vertical text, headers, footers, ruby",
          "equations": "Equations", "fields": "Fields and tables of contents",
          "revisions": "Tracked changes", "comments": "Comments",
+         "checks": "Checks: spelling, language and the document's health",
          "view": "View", "screen": "Seeing a page", "edit": "Undo"}
 
 
