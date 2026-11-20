@@ -189,7 +189,7 @@ Windows では、対象が Word のアクティブな文書のとき、1 回の�
 
 ### 🖼️ 図形と浮動の画像
 
-`word_insert_shape`、`word_insert_text_box`、`word_insert_line`、`word_insert_floating_picture` で、文字の折り返し、位置、前後関係、塗り、線、テキストを指定して配置します。`word_set_shape` であとから変更でき、画像のトリミングや薄くする処理、浮動と行内の切り替えもできます。`header_footer` を指定するとヘッダーやフッターに配置でき、ロゴや罫線として全ページに表示されます（Mac では浮動の画像は [VBA ブリッジ](#vba-ブリッジ)を通します）。
+`word_insert_shape`、`word_insert_text_box`、`word_insert_line`、`word_insert_floating_picture` で、文字の折り返し、位置、前後関係、塗り、線、テキストを指定して配置します。`word_set_shape` であとから変更でき、画像のトリミングや薄くする処理、浮動と行内の切り替え、別の段落へのアンカーの移動（`anchor_to`）もできます。`header_footer` を指定するとヘッダーやフッターに配置でき、ロゴや罫線として全ページに表示されます（Mac では浮動の画像は [VBA ブリッジ](#vba-ブリッジ)を通します）。
 
 ### 📄 ページを見る
 

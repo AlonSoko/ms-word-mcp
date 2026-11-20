@@ -429,6 +429,10 @@ class SetShapeInput(ShapeRef, _Position, _Wrap, _Common, _Look, _Text, _PictureL
     corner_radius: float | None = Field(None, ge=0, le=1)
     begin_arrow: Literal[tuple(ARROWS)] | None = None  # type: ignore[valid-type]
     end_arrow: Literal[tuple(ARROWS)] | None = None  # type: ignore[valid-type]
+    anchor_to: int | None = Field(None, ge=1, description=(
+        "Anchor it to this paragraph of the body instead: it then goes with that "
+        "paragraph, to its page, and is deleted with it. Its place, look, text and name "
+        "stay; a place measured from the paragraph is now from this one."))
 
     @field_validator("kind")
     @classmethod
@@ -1049,9 +1053,46 @@ def _list_shapes_impl(start, limit):
     return out
 
 
+REANCHOR_IN_BODY = ("'{name}' is in a {part}: `anchor_to` moves a shape of the body to "
+                    "another paragraph of the body.")
+
+
+def _reanchor(doc, s, index: int):
+    """The shape anchored to paragraph `index`: its anchor's position, which
+    the text does not show, copied there with its formatted text (which holds
+    the shape), and the shape at the old anchor deleted. The copy keeps the
+    shape's place, look, text and name (measured on both platforms)."""
+    where = _where(s)
+    if where is not None:
+        raise ValueError(REANCHOR_IN_BODY.format(name=s.Name, part=where[0]))
+    target = paragraph(doc, index).Range
+    if target.Start <= s.Anchor.Start < target.End:
+        return s, False
+    before = {x.ID for x in _all_shapes(doc)}
+    old_id, at = s.ID, s.Anchor.Start
+    doc.Range(target.Start, target.Start).FormattedText = doc.Range(at, at + 1).FormattedText
+    new = [x for x in _all_shapes(doc) if x.ID not in before]
+    if len(new) != 1:
+        raise RuntimeError(f"Word answered without error, but {len(new)} shapes were made in "
+                           f"paragraph {index}, not one. The shape is where it was; read the "
+                           "document back with word_list_shapes.")
+    name = s.Name
+    next(x for x in _all_shapes(doc) if x.ID == old_id).Delete()
+    moved = new[0]
+    if moved.Name != name:
+        moved.Name = name
+    return moved, True
+
+
 def _set_shape_impl(shape, spec):
     doc = backend.word.document()
     s = _find(doc, shape)
+    spec = dict(spec)
+    to = spec.pop("anchor_to", None)
+    if to is not None:
+        s, _ = _reanchor(doc, s, to)
+        if not spec:
+            return _result(doc, s, {}, [])
     if "name" in spec and spec["name"] != s.Name:
         _check_name(doc, spec["name"])
     kind = _kind_of(s)
@@ -1723,11 +1764,57 @@ def _mac_list_shapes(start, limit):
     return out
 
 
+def _mac_reanchor(doc, s, name: str, index: int):
+    """_reanchor, on Word for Mac: the anchor's position copied with its
+    formatted text, and the shape at the old anchor deleted. Answers the moved
+    shape's place in the document's shapes."""
+    from appscript import k
+
+    from . import mac as m
+
+    if _mac_where(doc, name) is not None:
+        raise ValueError(REANCHOR_IN_BODY.format(name=name, part=_mac_where(doc, name)[0]))
+    m._para(doc, index)
+    start, end = m._bounds(doc, index)
+    at = s.anchor.start_of_content.get()
+    if start <= at < end:
+        return False
+
+    def anchored():
+        return [(doc.shapes[i].name.get(), doc.shapes[i].anchor.start_of_content.get())
+                for i in range(1, int(doc.count(each=k.shape)) + 1)]
+
+    before = anchored()
+    doc.create_range(start=start, end_=start).formatted_text.set(
+        doc.create_range(start=at, end_=at + 1).formatted_text)
+    after = anchored()
+    # The copy is the one more shape of that name; the old one is at its old
+    # anchor, one place on now if the new paragraph is before it.
+    copies = [i for i, (n, a) in enumerate(after, 1) if n == name
+              and m._index_at(doc, a) == index]
+    if len(after) != len(before) + 1 or not copies:
+        raise RuntimeError("Word answered without error, but the shape was not copied to "
+                           f"paragraph {index}. Read the document back with word_list_shapes.")
+    shift = 1 if start <= at else 0
+    old = next(i for i, (n, a) in enumerate(after, 1) if n == name and a == at + shift)
+    doc.shapes[old].delete()
+    return True
+
+
 @mac_impl(_set_shape_impl)
 def _mac_set_shape(shape, spec):
     doc = backend.word.document()
     s, own_name = _mac_find(doc, shape)
     name = s.name.get()
+    spec = dict(spec)
+    to = spec.pop("anchor_to", None)
+    if to is not None:
+        if not own_name:
+            raise ValueError(TWO_NAMES.format(count=_mac_names(doc).count(name), name=name))
+        _mac_reanchor(doc, s, name, to)
+        s = doc.shapes[name]
+        if not spec:
+            return _mac_result(doc, name, {}, [])
     if "name" in spec and spec["name"] != name:
         _mac_check_name(doc, spec["name"])
     if not own_name and set(spec) - {"name"}:
@@ -1926,9 +2013,8 @@ def register(mcp) -> None:
         kind or name; crop or fade a picture. Only what is given changes, and it is
         read back.
 
-        A picture set to wrap inline goes into the text as an inline picture. A
-        shape stays anchored to its paragraph: to take it to another paragraph,
-        delete it and insert it there."""
+        A picture set to wrap inline goes into the text as an inline picture.
+        `anchor_to` anchors it to another paragraph, which it then goes with."""
         p = params
         return await call(_set_shape_impl, p.shape, spec_of(p, "shape"), undo="Change shape")
 

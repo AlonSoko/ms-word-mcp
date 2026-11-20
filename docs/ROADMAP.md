@@ -136,8 +136,8 @@ Then, ordered roughly by what the owner stressed.
 5. **Japanese typography, the rest.** Removing ruby outright, tate-chu-yoko.
 6. **View.** Zoom (percentage, page width, whole page), view type, follow
    edits in a second window.
-7. Shapes, the rest. Moving a shape to another paragraph. (Grouping, and
-   shapes in headers and footers, are done.)
+7. ~~Shapes, the rest.~~ Done: grouping, shapes in headers and footers, and
+   moving a shape to another paragraph (`anchor_to` in word_set_shape).
 
 ## Platforms
 

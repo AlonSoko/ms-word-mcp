@@ -189,7 +189,7 @@ Every member and constant is checked against Microsoft's documentation ([docs/re
 
 ### 🖼️ Shapes and Floating Pictures
 
-`word_insert_shape`, `word_insert_text_box`, `word_insert_line` and `word_insert_floating_picture` add objects with text wrapping, position, layer order, fill, line and text. `word_set_shape` changes them afterwards, crops and fades pictures, and moves a picture between floating and in line. With `header_footer` they go in a header or footer instead, as a logo or a rule on every page (on the Mac a floating picture there goes through the [VBA bridge](#the-vba-bridge)).
+`word_insert_shape`, `word_insert_text_box`, `word_insert_line` and `word_insert_floating_picture` add objects with text wrapping, position, layer order, fill, line and text. `word_set_shape` changes them afterwards, crops and fades pictures, moves a picture between floating and in line, and anchors a shape to another paragraph (`anchor_to`). With `header_footer` they go in a header or footer instead, as a logo or a rule on every page (on the Mac a floating picture there goes through the [VBA bridge](#the-vba-bridge)).
 
 ### 📄 Seeing a Page
 

@@ -523,3 +523,15 @@ repeats it.
 | A caption before any heading of the level | Word searches on and takes the next heading's number (1.1) |
 | A heading level the document does not have | "Error! No text of specified style in document.": the call warns |
 
+## Moving a shape's anchor to another paragraph (Word 16, both platforms)
+
+Measured 2026-11-21; `run_move_anchor_steps` in `scripts/live_check.py`
+repeats it.
+
+| What | Answer |
+|---|---|
+| A shape's anchor | One position of its own at the start of the paragraph, which the text does not show ("One." with a shape reads 0 to 6); two shapes in a paragraph have one each |
+| Its formatted text (`Range(a, a + 1).FormattedText`; on the Mac `formatted text`) put at another paragraph's start | A copy of the shape anchored there: the same name, place (from the new paragraph when measured from the paragraph), size, fill, wrap and text; the paragraphs' text unchanged |
+| The shape at the old anchor deleted after | Moved: it goes with its new paragraph when text is inserted above, and the other shape of the old paragraph stays |
+| There is no setter for a shape's anchor in either object model | |
+

@@ -289,6 +289,7 @@ def run_steps(path: str) -> None:
     run_shape_steps()
     run_group_steps()
     run_header_shape_steps()
+    run_move_anchor_steps()
     run_chapter_number_steps()
     run_floating_picture_steps(Path(path).parent)
     run_safety_steps(Path(path).parent)
@@ -2133,6 +2134,61 @@ def run_chapter_number_steps() -> None:
         step("a picture of the page", screen._get_page_image_impl, 1, None,
              check=lambda o: o.get("page") == 1)
         step("close the document for chapter numbers", documents._close_document_impl, False)
+    finally:
+        call_document.reset(token)
+
+
+def run_move_anchor_steps() -> None:
+    """Shapes moved to another paragraph: anchored there, with their place and look."""
+    other = step("a document for moving anchors", documents._create_document_impl, None, None)
+    if "error" in other:
+        return
+    token = call_document.set(other["full_name"])
+    try:
+        words = ["One.", "Two.", "Three.", "Four."]
+        made = step("four paragraphs", text._insert_paragraphs_impl,
+                    [{"text": t, "style": "Normal"} for t in words], None, None)
+        if "error" in made:
+            return
+        step("A in paragraph 1", shapes._insert_shape_impl, "oval", 1, 60.0, 30.0,
+             {"name": "A", "left": 100.0, "top": 0.0, "fill": "#C00000"}, undo="Insert shape")
+        step("B in paragraph 1 too", shapes._insert_shape_impl, "rectangle", 1, 60.0, 30.0,
+             {"name": "B", "left": 200.0, "top": 0.0}, undo="Insert shape")
+        step("a text box T in paragraph 2", shapes._insert_text_box_impl, 2, 120.0, 30.0,
+             {"name": "T", "left": 300.0, "top": 0.0, "text": "Note"}, undo="Insert text box")
+        where = lambda o: {x["name"]: x["index"] for x in o["shapes"]}  # noqa: E731
+        step("A moved to paragraph 3, as it was", shapes._set_shape_impl, "A", {"anchor_to": 3},
+             undo="Change shape",
+             check=lambda o: (o.get("name"), o.get("index"), o.get("left"), o.get("fill"))
+             == ("A", 3, 100.0, "#C00000"))
+        step("B stays in paragraph 1", shapes._list_shapes_impl, 1, 50,
+             check=lambda o: where(o) == {"A": 3, "B": 1, "T": 2} and o["count"] == 3)
+        step("B moved to paragraph 4 and filled in one call", shapes._set_shape_impl, "B",
+             {"anchor_to": 4, "fill": "#00A000"}, undo="Change shape",
+             check=lambda o: (o.get("index"), o.get("fill")) == (4, "#00A000"))
+        step("T moved back to paragraph 1, with its text", shapes._set_shape_impl, "T",
+             {"anchor_to": 1}, undo="Change shape",
+             check=lambda o: o.get("index") == 1 and o.get("text") == "Note")
+        step("to the paragraph it is in already", shapes._set_shape_impl, "T", {"anchor_to": 1},
+             undo="Change shape", check=lambda o: o.get("index") == 1)
+        step("three shapes, each where it was sent", shapes._list_shapes_impl, 1, 50,
+             check=lambda o: where(o) == {"T": 1, "A": 3, "B": 4} and o["count"] == 3)
+        step("the text is as it was", text._get_paragraphs_impl, 1, 4, False,
+             check=lambda o: [p["text"] for p in o["paragraphs"]] == words)
+        step("a paragraph put first", text._insert_paragraphs_impl,
+             [{"text": "Zero.", "style": "Normal"}], None, 1, undo="Insert paragraphs")
+        step("the shapes go with their paragraphs", shapes._list_shapes_impl, 1, 50,
+             check=lambda o: where(o) == {"T": 2, "A": 4, "B": 5})
+        step("a picture of the page", screen._get_page_image_impl, 1, None,
+             check=lambda o: o.get("page") == 1)
+        step("a header", page._set_header_footer_impl, "header", "Head", "primary", 1, None,
+             None, undo="Set header or footer")
+        step("a shape in the header", shapes._insert_shape_impl, "oval", 1, 20.0, 20.0,
+             {"name": "H", "header_footer": {"part": "header", "which": "primary", "section": 1}},
+             undo="Insert shape")
+        step("is not moved into the body", shapes._set_shape_impl, "H", {"anchor_to": 1},
+             check=lambda o: "moves a shape of the body" in o.get("error", ""))
+        step("close the document for moving anchors", documents._close_document_impl, False)
     finally:
         call_document.reset(token)
 

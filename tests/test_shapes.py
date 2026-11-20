@@ -478,3 +478,12 @@ def test_a_place_in_a_header_or_footer_is_checked():
     with pytest.raises(ValidationError):
         shapes.InsertShapeInput(kind="oval", index=1, width=10, height=10,
                                 header_footer={"part": "side"})
+
+
+def test_a_shape_is_anchored_to_another_paragraph_by_number():
+    from pydantic import ValidationError
+
+    assert shapes.SetShapeInput(shape="A", anchor_to=3).anchor_to == 3
+    with pytest.raises(ValidationError):
+        shapes.SetShapeInput(shape="A", anchor_to=0)
+    assert "moves a shape of the body" in shapes.REANCHOR_IN_BODY.format(name="H", part="header")
