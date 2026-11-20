@@ -22,7 +22,7 @@ follows what the owner asked for in ykuwai/ppt-mcp#352 and since.
 - Server: catalog mode, per-call `document`, unknown-argument refusals,
   failures marked as errors, the single Word worker with busy handling and
   recovery from a stuck call.
-- Documents: info, list, choose, open, create, save, save as (and PDF), close.
+- Documents: info, list, choose, open, create, save, save as (and PDF, of some pages, with or without the markup), close.
 - Text: outline, paragraphs, insert paragraphs with styles, rewrite, delete,
   find and replace.
 - Formatting: fonts per script (Latin, East Asian, complex script), size,
