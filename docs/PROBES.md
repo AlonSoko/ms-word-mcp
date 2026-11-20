@@ -389,3 +389,19 @@ AccessVBOM is turned on for the build only and was unset before and after).
 | What Word for Mac's scripting lacks (`run_mac_gap_steps`) | Over COM, as before | Through the bridge's `Member` request: a complex-script size, an underline color, right to left, tab stops, a new paragraph or character style with `quick_style` and `priority`, table columns, a shape's alt text and vertical anchor, each read back as on Windows (17 of 17 steps, the same answers as Windows') |
 | `CallByName` in Word for Mac's VBA | | Works without arguments; with any, it fails (`Range(0, 5)`: error 1004; `Paragraphs.Item(1)`: overflow) and does not pass a value to set. The members the server calls with arguments (`Range`, `Item`, `Add`) and the properties it sets are named in the macro instead |
 | A table after a column is added through VBA | | `uniform` reads false (the new column has another width), and Apple Events then cannot reach the columns one by one; VBA's `Columns(i).Delete` can, as on Windows |
+
+## Table borders, sorting and splitting cells (Word 16, both platforms)
+
+Measured 2026-11-20 on Word for Mac 16.114 and Word for Windows (Microsoft 365);
+`run_table_more_steps` in `scripts/live_check.py` repeats them, in a document
+that is not the active one.
+
+| What | Windows | Mac |
+|---|---|---|
+| A cell's border on one side | `Cell.Borders(wdBorderBottom)` | `get border` of a cell, as of a paragraph |
+| Sorting | `Table.Sort` with up to three fields, `ExcludeHeader` | `table sort`, the same fields (`field number two`...) |
+| Splitting a cell | `Cell.Split(NumRows, NumColumns)` | `split cell`; the row then holds more cells and `uniform` reads false |
+| Sorting or splitting a document that is not the active one | It stays in the background | The same: the active document stays active |
+| A cell asked for at a row past the last | `Table.Cell(9, 1)` of a 5-row table answers a cell of row 5, which was split | The same, through `get cell from table`. The row and the cell's place in it are checked first, on both platforms |
+| A cell past the last of a shorter row (after a merge) | `Table.Cell` raises | `get cell from table` is refused (-1708); formatting a block skips that position, as on Windows |
+

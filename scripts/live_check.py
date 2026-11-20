@@ -264,6 +264,7 @@ def run_steps(path: str) -> None:
          text._get_outline_impl, False,
          check=lambda o: o["headings"] == full["headings"] and len(o["headings"]) >= 2)
     run_table_steps()
+    run_table_more_steps()
     run_picture_and_page_steps(Path(path).parent)
     run_review_steps()
     run_heading_number_steps()
@@ -1610,6 +1611,78 @@ def _active_document():
 
 
 _common.MAC_IMPLS[_active_document.__name__] = _active_document  # a Mac-only check
+
+
+def run_table_more_steps() -> None:
+    """Borders one side at a time, sorting and splitting a cell, in a document
+    that is not the active one."""
+    other = step("a document for borders and sorting", documents._create_document_impl, None,
+                 None)
+    if "error" in other:
+        return
+    front = step("another document in front", documents._create_document_impl, None, None)
+    token = call_document.set(other["full_name"])
+    try:
+        made = step("a paragraph before the table", text._insert_paragraphs_impl,
+                    [{"text": "Prices", "style": "Normal"}], None, None)
+        if "error" in made:
+            return
+        t = step("a table with a heading row", tables._insert_table_impl,
+                 [["Item", "Qty"], ["Pear", "10"], ["Apple", "3"], ["Fig", "25"], ["日本", "7"]],
+                 1, None, 1, None, None, None, None, None, None, undo="Insert table")
+        if "error" in t:
+            return
+        n = t["table"]
+        step("a double rule under the heading row", tables._format_cells_impl, n, 1, 1, 1, None,
+             None, None, None, None, None, None, None,
+             {"bottom": {"style": "double", "width": 1.5, "color": "#1F4E79"}},
+             undo="Format table cells",
+             check=lambda o: "warnings" not in o
+             and o["first_cell_reads"]["borders"]["bottom"] == {
+                 "style": "double", "width": 1.5, "color": "#1F4E79"})
+        step("no lines between the body rows, a box around them", tables._format_cells_impl, n, 2,
+             None, 1, None, None, None, None, None, None, None, None,
+             {"inside_horizontal": {"style": "none"}, "left": {"style": "single", "width": 0.5},
+              "right": {"style": "single", "width": 0.5},
+              "bottom": {"style": "single", "width": 0.5}},
+             undo="Format table cells",
+             check=lambda o: "warnings" not in o and o["cells"] == 8
+             and "bottom" not in o["first_cell_reads"]["borders"]
+             and o["first_cell_reads"]["borders"]["left"]["width"] == 0.5)
+        step("sorted by quantity, largest first, the heading row kept", tables._sort_table_impl, n,
+             [{"column": 2, "order": "descending", "kind": "number"}], None, undo="Sort table",
+             check=lambda o: o["header_kept"] is True
+             and [r[0] for r in o["cells"]] == ["Item", "Fig", "Pear", "日本", "Apple"])
+        step("sorted by name", tables._sort_table_impl, n,
+             [{"column": 1, "order": "ascending", "kind": "text"}], True, undo="Sort table",
+             check=lambda o: o["cells"][0] == ["Item", "Qty"]
+             and [r[0] for r in o["cells"]][1:4] == ["Apple", "Fig", "Pear"])
+        step("a column past the last is refused", tables._sort_table_impl, n,
+             [{"column": 5, "order": "ascending", "kind": "text"}], None,
+             check=lambda o: "There is no column 5" in o.get("error", ""))
+        step("a cell split in two", tables._split_cell_impl, n, 2, 2, 1, 2,
+             undo="Split table cell",
+             check=lambda o: len(o["cells"][1]) == 3 and len(o["cells"][2]) == 2)
+        step("a cell that is not there is refused", tables._split_cell_impl, n, 9, 1, 1, 2,
+             check=lambda o: "There is no cell at row 9" in o.get("error", ""))
+        step("and nothing was split", tables._get_table_impl, n, 1,
+             check=lambda o: [len(r) for r in o["cells"]] == [2, 3, 2, 2, 2])
+        step("bold across the uneven rows skips what is not there", tables._format_cells_impl, n,
+             1, None, 3, 3, None, True, None, None, None, None, None, None,
+             undo="Format table cells",
+             check=lambda o: o["cells"] == 1 and "no cell of their own" in o["warnings"][0])
+        if backend.IS_MACOS and "error" not in front:
+            step("the other document is still the active one", _active_document,
+                 check=lambda o: o["name"] == front["name"])
+        step("close the document for borders and sorting", documents._close_document_impl, False)
+    finally:
+        call_document.reset(token)
+    if "error" not in front:
+        token = call_document.set(front["full_name"])
+        try:
+            step("close the document in front", documents._close_document_impl, False)
+        finally:
+            call_document.reset(token)
 
 
 def run_table_steps() -> None:

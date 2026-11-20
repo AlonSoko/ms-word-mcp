@@ -97,9 +97,10 @@ follows what the owner asked for in ykuwai/ppt-mcp#352 and since.
 
 - Tables: insert one filled with its cells (style, heading rows, grid
   lines, column widths and alignments, autofit, position), list and read
-  them, write and format blocks of cells (shading, bold, color, alignment),
-  add and delete rows and columns, merge cells, delete a table. Adding
-  columns works on Windows only.
+  them, write and format blocks of cells (shading, bold, color, alignment,
+  borders one side at a time), add and delete rows and columns, merge and
+  split cells, sort, delete a table. On the Mac adding columns goes through
+  the VBA bridge.
 
 ## Next
 
@@ -130,8 +131,8 @@ Then, ordered roughly by what the owner stressed.
    chapter-style numbers (2.1) with STYLEREF, cross-references to equations,
    editing an equation in place.
 4. **Figures and tables, the rest.** A list of
-   figures, numbers with the chapter (2.1); splitting cells, sorting, table
-   borders one side at a time.
+   figures, numbers with the chapter (2.1). (Splitting cells, sorting, and
+   table borders one side at a time are done.)
 5. **Japanese typography, the rest.** Removing ruby outright, tate-chu-yoko.
 6. **View.** Zoom (percentage, page width, whole page), view type, follow
    edits in a second window.
