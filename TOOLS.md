@@ -11,7 +11,7 @@ another conversation has chosen.
 | Area | Tools |
 |---|---|
 | Word and documents | `word_get_app_info`, `word_list_documents`, `word_activate_document`, `word_open_document`, `word_create_document`, `word_save_document`, `word_save_document_as` (also PDF), `word_close_document` |
-| Reading | `word_get_document_info`, `word_get_outline`, `word_get_paragraphs` |
+| Reading | `word_get_document_info`, `word_get_outline`, `word_get_paragraphs`, `word_get_selection` (what the user has selected) |
 | Writing | `word_insert_paragraphs`, `word_set_paragraph_text`, `word_delete_paragraphs`, `word_find_replace` |
 | Formatting | `word_format_text`, `word_set_paragraph_format` |
 | Styles | `word_apply_style`, `word_list_styles`, `word_get_style`, `word_set_style` |

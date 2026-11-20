@@ -239,7 +239,8 @@ user to stop typing.
 
 ## Fixing an existing document
 
-Read it first (`word_get_paragraphs` with `detail` shows each paragraph's
+When the user speaks of "this" or "what I've selected", `word_get_selection`
+gives what is selected in Word and the paragraphs it spans. Read it first (`word_get_paragraphs` with `detail` shows each paragraph's
 style, fonts, bold and color). Paragraphs made to look like headings by
 formatting alone: `word_apply_style` with a heading style and
 `clear_direct_formatting`. Typed bullets ("・", "-", "•"): take the typed
@@ -314,9 +315,9 @@ mcp = WordServer("ms_word_mcp", lifespan=app_lifespan, instructions=INSTRUCTIONS
 
 from .tools import (  # noqa: E402,F401 - mac registers the Mac halves
     checks, comments, documents, edit, equations, fields, formatting, links, lists, mac, notes, page,
-    references, revisions, screen, shapes, tables, text, view)
+    references, revisions, screen, selection, shapes, tables, text, view)
 
-for module in (documents, text, formatting, lists, tables, references, shapes, notes, links, equations,
+for module in (documents, text, selection, formatting, lists, tables, references, shapes, notes, links, equations,
                fields, revisions, comments, checks, page, view, screen, edit):
     module.register(mcp)
 
@@ -423,7 +424,7 @@ def summary(description):
     return text[:120]
 
 
-AREAS = {"documents": "Documents", "text": "Reading and writing text",
+AREAS = {"documents": "Documents", "text": "Reading and writing text", "selection": "What the user has selected",
          "formatting": "Formatting and styles", "lists": "Lists", "tables": "Tables",
          "references": "Pictures, captions and cross-references",
          "shapes": "Floating shapes, text boxes and lines",

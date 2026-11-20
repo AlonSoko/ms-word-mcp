@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <strong>Real-time Microsoft Word control on Windows and macOS —<br>an MCP server with <!--tools-->93<!--/tools--> tools that works in the document beside you.</strong>
+  <strong>Real-time Microsoft Word control on Windows and macOS —<br>an MCP server with <!--tools-->94<!--/tools--> tools that works in the document beside you.</strong>
 </p>
 
 ---

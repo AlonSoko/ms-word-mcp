@@ -24,7 +24,7 @@ from ms_word_mcp import backend  # noqa: E402
 from ms_word_mcp.backend import call_document  # noqa: E402
 from ms_word_mcp.tools import (  # noqa: E402
     _common, checks, comments, documents, edit, equations, fields, formatting, links, lists, notes, page,
-    references, revisions, screen, shapes, tables, text)
+    references, revisions, screen, selection, shapes, tables, text)
 
 results: list[tuple[str, bool]] = []
 
@@ -265,6 +265,7 @@ def run_steps(path: str) -> None:
     run_comment_steps()
     run_check_steps()
     run_section_steps()
+    run_selection_steps()
     run_revision_steps()
     run_link_steps()
     run_shape_steps()
@@ -731,6 +732,66 @@ def run_section_steps() -> None:
         step("a paragraph that is not there is refused", page._insert_section_break_impl, 99,
              "next_page", check=lambda o: "There is no paragraph 99" in o["error"])
         step("close the document of sections", documents._close_document_impl, False)
+    finally:
+        call_document.reset(token)
+
+
+def _select(full_name, start, end):
+    """Select [start, end) in a document, as the user would: only the live check
+    moves the selection, never a tool."""
+    def select():
+        app = backend.word.get_app()
+        if backend.IS_MACOS:
+            doc = next(d for d in app.documents.get() if d.name.get() == full_name)
+            doc.activate_object()
+            # No `select` command; the selection's own bounds are set.
+            app.selection.selection_start.set(start)
+            app.selection.selection_end.set(end)
+        else:
+            doc = app.Documents.Item(full_name)
+            doc.Activate()
+            doc.Range(start, end).Select()
+        return {"success": True}
+    return backend.word.execute(select)
+
+
+def run_selection_steps() -> None:
+    """What the user has selected, read back."""
+    other = step("a document for the selection", documents._create_document_impl, None, None)
+    if "error" in other:
+        return
+    token = call_document.set(other["full_name"])
+    try:
+        made = step("three paragraphs for the selection", text._insert_paragraphs_impl,
+                    [{"text": "First.", "style": "Normal"},
+                     {"text": "Second paragraph 𠮷.", "style": "Normal"},
+                     {"text": "第三段落。", "style": "Normal"}], None, None)
+        if "error" in made:
+            return
+        name = other["full_name"]
+        _select(name, 7, 27)  # 𠮷 is two places in Word's count
+        step("a selection in one paragraph", selection._get_selection_impl,
+             check=lambda o: (o["start"], o["end"], o["text"], o["story"], o["empty"])
+             == (2, 2, "Second paragraph 𠮷.", "main", False))
+        _select(name, 3, 31)
+        step("a selection across paragraphs", selection._get_selection_impl,
+             check=lambda o: (o["start"], o["end"]) == (1, 3) and o["text"].startswith("st.\r"))
+        _select(name, 28, 28)
+        step("the cursor alone", selection._get_selection_impl,
+             check=lambda o: o["empty"] is True and o["text"] == "" and (o["start"], o["end"]) == (3, 3)
+             and "cursor is in paragraph 3" in o["note"])
+        third = step("a second document", documents._create_document_impl, None, None)
+        if "error" not in third:
+            _select(name, 0, 6)
+            call_document.reset(token)
+            token = call_document.set(third["full_name"])
+            step("a selection in another document says how to reach it",
+                 selection._get_selection_impl,
+                 check=lambda o: o["text"] == "First." and f"document={name!r}" in o["note"])
+            step("close the second document", documents._close_document_impl, False)
+            call_document.reset(token)
+            token = call_document.set(name)
+        step("close the document of the selection", documents._close_document_impl, False)
     finally:
         call_document.reset(token)
 
