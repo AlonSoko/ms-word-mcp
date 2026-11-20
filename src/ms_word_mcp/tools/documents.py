@@ -5,7 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 import os
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from .. import backend
 from ._common import READ_ONLY, WRITES, DESTRUCTIVE, Input, Trimmed, annotations, call, local_path
@@ -191,6 +191,23 @@ class SaveDocumentAsInput(Input):
         + ", ".join(sorted(SAVE_FORMATS)) + ". A .pdf is an export: the document "
         "keeps its own file."))
     overwrite: bool = Field(False, description="Replace a file already at `path`.")
+    from_page: int | None = Field(None, ge=1, description=(
+        "A PDF of some pages only: the first. Leave out for every page."))
+    to_page: int | None = Field(None, ge=1, description="The last page; leave out for `from_page` alone.")
+    markup: bool = Field(False, description=(
+        "A PDF with the comments and tracked changes drawn, as Word shows them for review. "
+        "Leave false for the document as it will print: no comments, the changes as accepted."))
+
+    @model_validator(mode="after")
+    def _pdf_only(self):
+        pdf = os.path.splitext(self.path)[1].lower() == ".pdf"
+        if not pdf and (self.from_page or self.to_page or self.markup):
+            raise ValueError("`from_page`, `to_page` and `markup` are for a .pdf only.")
+        if self.to_page is not None and self.from_page is None:
+            raise ValueError("Give `from_page` with `to_page`.")
+        if self.to_page is not None and self.to_page < self.from_page:
+            raise ValueError(f"to_page ({self.to_page}) comes before from_page ({self.from_page}).")
+        return self
 
     @field_validator("path")
     @classmethod
@@ -203,7 +220,23 @@ class SaveDocumentAsInput(Input):
         return value
 
 
-def _save_document_as_impl(path: str, overwrite: bool):
+WD_EXPORT_FROM_TO = 3  # WdExportRange
+WD_EXPORT_CONTENT, WD_EXPORT_WITH_MARKUP = 0, 7  # WdExportItem
+
+
+def check_pages(from_page, to_page, total: int) -> tuple[int, int] | None:
+    """The pages to export, checked against the document's count."""
+    if from_page is None:
+        return None
+    last = to_page or from_page
+    if last > total:
+        raise ValueError(f"There is no page {last}: the document has {total} pages. "
+                         "Nothing was exported.")
+    return from_page, last
+
+
+def _save_document_as_impl(path: str, overwrite: bool, from_page=None, to_page=None,
+                           markup: bool = False):
     if os.path.exists(path) and not overwrite:
         raise ValueError(f"'{path}' already exists. Pass overwrite=true to replace it.")
     folder = os.path.dirname(path)
@@ -211,16 +244,26 @@ def _save_document_as_impl(path: str, overwrite: bool):
         raise ValueError(f"The folder '{folder}' does not exist.")
     doc = backend.word.document()
     ext = os.path.splitext(path)[1].lower()
+    pages = None
     if ext == ".pdf":
-        doc.ExportAsFixedFormat(OutputFileName=path, ExportFormat=17,
-                                OpenAfterExport=False)
+        from ._word import WD_STATISTIC_PAGES
+
+        pages = check_pages(from_page, to_page, doc.ComputeStatistics(WD_STATISTIC_PAGES))
+        extra = {} if pages is None else {"Range": WD_EXPORT_FROM_TO, "From": pages[0], "To": pages[1]}
+        doc.ExportAsFixedFormat(OutputFileName=path, ExportFormat=17, OpenAfterExport=False,
+                                Item=WD_EXPORT_WITH_MARKUP if markup else WD_EXPORT_CONTENT, **extra)
     else:
         doc.SaveAs2(FileName=path, FileFormat=SAVE_FORMATS[ext])
         backend.word.target_full_name = doc.FullName
     if not os.path.exists(path):
         raise RuntimeError(f"Word answered without error, but there is no file at '{path}'.")
-    return {"success": True, "path": path, "bytes": os.path.getsize(path),
-            "document": doc.FullName}
+    result = {"success": True, "path": path, "bytes": os.path.getsize(path),
+              "document": doc.FullName}
+    if ext == ".pdf":
+        result["markup"] = markup
+        if pages is not None:
+            result["pages"] = list(pages)
+    return result
 
 
 class CloseDocumentInput(Input):
@@ -294,10 +337,14 @@ def register(mcp) -> None:
     async def word_save_document_as(params: SaveDocumentAsInput) -> str:
         """Save the document under a new path, or export it as PDF.
 
-        The extension picks the format. Checks that the file exists afterwards.
+        The extension picks the format. A PDF can be some pages only
+        (`from_page`, `to_page`), and is the document as it will print unless
+        `markup` asks for the comments and tracked changes drawn. Checks that
+        the file exists afterwards.
         """
-        return await call(_save_document_as_impl, params.path,
-                                   params.overwrite)
+        p = params
+        return await call(_save_document_as_impl, p.path, p.overwrite, p.from_page, p.to_page,
+                          p.markup)
 
     @mcp.tool(name="word_close_document", annotations=annotations("Close", DESTRUCTIVE))
     async def word_close_document(params: CloseDocumentInput) -> str:

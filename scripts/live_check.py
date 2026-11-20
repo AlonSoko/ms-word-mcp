@@ -266,6 +266,7 @@ def run_steps(path: str) -> None:
     run_check_steps()
     run_section_steps()
     run_selection_steps()
+    run_pdf_steps()
     run_revision_steps()
     run_link_steps()
     run_shape_steps()
@@ -792,6 +793,60 @@ def run_selection_steps() -> None:
             call_document.reset(token)
             token = call_document.set(name)
         step("close the document of the selection", documents._close_document_impl, False)
+    finally:
+        call_document.reset(token)
+
+
+def _pdf_text(path):
+    """The text of a PDF, on the Mac (PDFKit); None elsewhere."""
+    if not backend.IS_MACOS:
+        return None
+    import Quartz
+    from Foundation import NSURL
+
+    return str(Quartz.PDFDocument.alloc().initWithURL_(NSURL.fileURLWithPath_(path)).string())
+
+
+def run_pdf_steps() -> None:
+    """A PDF of some pages, as it will print or with its comments drawn."""
+    other = step("a document for PDFs", documents._create_document_impl, None, None)
+    if "error" in other:
+        return
+    token = call_document.set(other["full_name"])
+    folder = references.CONTAINER if backend.IS_MACOS else tempfile.gettempdir()
+    stamp = time.strftime("%H%M%S")
+    try:
+        made = step("three pages for PDFs", text._insert_paragraphs_impl,
+                    [{"text": "Page one.", "style": "Normal"}, {"text": "Page two.", "style": "Normal"},
+                     {"text": "Page three.", "style": "Normal"}], None, None)
+        if "error" in made:
+            return
+        step("a break before page two", page._insert_section_break_impl, 1, "next_page")
+        step("a break before page three", page._insert_section_break_impl, 3, "next_page")
+        step("a comment on page one", comments._add_comment_impl, 1, "REVIEWNOTE on page one", None)
+        whole = os.path.join(folder, f"ms-word-mcp-print-{stamp}.pdf")
+        step("a PDF as it will print", documents._save_document_as_impl, whole, True, None, None, False,
+             check=lambda o: o["markup"] is False and o["bytes"] > 0
+             and (_pdf_text(whole) is None or ("Page one" in _pdf_text(whole)
+                                               and "REVIEWNOTE" not in _pdf_text(whole))))
+        marked = os.path.join(folder, f"ms-word-mcp-markup-{stamp}.pdf")
+        step("a PDF with its comments drawn", documents._save_document_as_impl, marked, True, None, None,
+             True, check=lambda o: o["markup"] is True
+             and (_pdf_text(marked) is None or "REVIEWNOTE" in _pdf_text(marked)))
+        part = os.path.join(folder, f"ms-word-mcp-pages-{stamp}.pdf")
+        step("pages two to three", documents._save_document_as_impl, part, True, 2, 3, False,
+             check=lambda o: o["pages"] == [2, 3]
+             and (_pdf_text(part) is None or ("Page two" in _pdf_text(part)
+                                              and "Page one" not in _pdf_text(part))))
+        step("a page that is not there is refused", documents._save_document_as_impl,
+             os.path.join(folder, f"ms-word-mcp-none-{stamp}.pdf"), True, 4, None, False,
+             check=lambda o: "There is no page 4" in o["error"])
+        step("and the comment is still in the document", comments._list_comments_impl, 1, 10,
+             check=lambda o: o["count"] == 1)
+        for path in (whole, marked, part):
+            if os.path.exists(path):
+                os.remove(path)
+        step("close the document of PDFs", documents._close_document_impl, False)
     finally:
         call_document.reset(token)
 
