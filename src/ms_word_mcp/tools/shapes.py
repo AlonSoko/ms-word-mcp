@@ -1214,6 +1214,29 @@ def _mac_apply(s, spec: dict, kind: str) -> list[str]:
     return warnings
 
 
+def _mac_cut_off(s) -> bool:
+    """Whether a shape's text is cut off, once Word for Mac says it overflows.
+
+    Word for Mac's `overflowing` also counts the blank space after the last
+    paragraph, which shows nowhere. Measured on 16.114: a 150 x 60 pt rounded
+    rectangle with a 2.5 pt outline and two 9 pt lines, all of them visible on
+    the page, answered true, and false with that space taken off; boxes whose
+    text was cut off (40 and 30 pt high) answered true either way. So it is
+    asked again without that space, and the space is put back."""
+    from appscript import k
+
+    text = s.text_frame.text_range
+    last = text.paragraphs[int(text.count(each=k.paragraph))].paragraph_format
+    space = last.space_after.get()
+    if not space:
+        return True
+    last.space_after.set(0)
+    try:
+        return s.text_frame.overflowing.get() is True
+    finally:
+        last.space_after.set(space)
+
+
 def _mac_result(doc, name: str, spec: dict, warnings: list[str]) -> dict:
     from . import mac as m
 
@@ -1223,7 +1246,8 @@ def _mac_result(doc, name: str, spec: dict, warnings: list[str]) -> dict:
     kind = _mac_kind_of(s)
     # `has text` is true for an empty shape on the Mac, and `overflowing` too.
     overflowing = (kind not in NO_TEXT and s.text_frame.overflowing.get() is True
-                   and bool(m._clean(s.text_frame.text_range.content.get())))
+                   and bool(m._clean(s.text_frame.text_range.content.get()))
+                   and _mac_cut_off(s))
     return _finished(_mac_describe(doc, s, _mac_number_of(doc, name)), spec, _mac_page(doc),
                      warnings, overflowing)
 

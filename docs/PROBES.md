@@ -298,7 +298,7 @@ Measured on the Mac with `scripts/probes/mac_notes_links.py`; on Windows through
 | Alternative text | Yes | `alternative text` is not a property of `shape`; read answers missing value, set -1708 |
 | Vertical anchor, auto size, word wrap of a text frame | Yes | Unknown property or missing value |
 | Vertical text | `TextFrame.Orientation = 4` | `vertical east asian`, code 4; upright kana, Latin on its side ([shape-look](probes/shape_look.py)) |
-| Whether the text fits | `TextFrame.Overflowing` answered True for an empty shape and for two lines of 9 pt in a 60 pt high shape, so it is not used | `overflowing` agrees with the page; `has text` is true for an empty shape, so the text is read instead |
+| Whether the text fits | `TextFrame.Overflowing` answered True for an empty shape and for two lines of 9 pt in a 60 pt high shape, so it is not used | `overflowing` agrees with the page but for one thing: it counts the blank space after the last paragraph. A 150 x 60 pt rounded rectangle with a 2.5 pt outline and two 9 pt lines, all visible, answered true, and false with that space at 0; boxes 40 and 30 pt high, whose second line was cut off, answered true either way (16.114, 2026-11-20). So a true is asked again with that space at 0, and the space is put back. `has text` is true for an empty shape, so the text is read instead |
 | A line's text frame | Touching `TextRange` is refused, even to read | Read answers nothing |
 | Undo | One undo takes a new shape back (live check) | Two undos did not take a new shape back |
 | Document not active | Works, active document unchanged | Works, active document unchanged |

@@ -239,3 +239,45 @@ def test_without_the_bridge_columns_of_a_table_not_uniform_are_refused(word, mon
     monkeypatch.setattr(tables.backend, "word", SimpleNamespace(document=lambda: None))
     with pytest.raises(ValueError, match="merged cells"):
         tables._mac_delete_columns(1, 2, 3)
+
+
+# -- text that overflows a shape on the Mac -----------------------------------------
+
+class _Frame:
+    """A shape whose text overflows by `need` points; the last paragraph's space
+    after counts, as Word for Mac counts it."""
+
+    def __init__(self, need, space):
+        self.need, self.log = need, []
+        self.space = space
+        frame = self
+
+        class Format:
+            space_after = SimpleNamespace(get=lambda: frame.space,
+                                          set=lambda v: (frame.log.append(v), setattr(frame, "space", v)))
+        self.text_frame = SimpleNamespace(
+            overflowing=SimpleNamespace(get=lambda: frame.need + frame.space > 0),
+            text_range=SimpleNamespace(count=lambda each: 2,
+                                       paragraphs={2: SimpleNamespace(paragraph_format=Format)}))
+
+
+@pytest.fixture
+def keys(monkeypatch):
+    import sys
+    monkeypatch.setitem(sys.modules, "appscript", SimpleNamespace(k=SimpleNamespace(paragraph="paragraph")))
+
+
+def test_text_overflowing_only_by_its_last_space_after_is_not_cut_off(keys):
+    s = _Frame(need=-3, space=8.0)  # fits with 3 pt to spare, but for the 8 pt after it
+    assert shapes._mac_cut_off(s) is False
+    assert s.space == 8.0 and s.log == [0, 8.0]  # put back
+
+
+def test_text_that_is_cut_off_stays_cut_off(keys):
+    s = _Frame(need=12, space=8.0)
+    assert shapes._mac_cut_off(s) is True and s.space == 8.0
+
+
+def test_with_no_space_after_word_is_taken_at_its_word(keys):
+    s = _Frame(need=5, space=0.0)
+    assert shapes._mac_cut_off(s) is True and s.log == []
