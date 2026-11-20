@@ -35,6 +35,11 @@ def step(label, impl, *args, undo=None, check=lambda out: "error" not in out):
         ok = bool(check(out))
     except (KeyError, IndexError, TypeError):
         ok = False
+    return record(label, ok, out)
+
+
+def record(label, ok, out):
+    """A step's result, from a tool's answer or from what the script worked out."""
     results.append((label, ok))
     print(f"{'PASS' if ok else 'FAIL'}  {label}")
     text = json.dumps(out, ensure_ascii=False)
@@ -267,6 +272,7 @@ def run_steps(path: str) -> None:
     run_section_steps()
     run_selection_steps()
     run_pdf_steps()
+    run_bridge_steps()
     run_revision_steps()
     run_link_steps()
     run_shape_steps()
@@ -633,20 +639,27 @@ def run_comment_steps() -> None:
              check=lambda o: "is not in paragraph 1" in o["error"])
         step("a comment that is not there is refused", comments._delete_comments_impl, [9], False,
              check=lambda o: "There is no comment 9" in o["error"])
-        if backend.IS_MACOS:
-            step("a reply says it works on Windows only", comments._reply_to_comment_impl, 1, "x",
-                 check=lambda o: "no replies" in o["error"])
-            step("done says it works on Windows only", comments._resolve_comment_impl, 1, True,
+        if backend.IS_MACOS and not _bridge_usable():
+            step("without the bridge a reply says why", comments._reply_to_comment_impl, 1, "x",
+                 check=lambda o: "no replies" in o["error"] and "cannot be used" in o["error"])
+            step("without the bridge done says why", comments._resolve_comment_impl, 1, True,
                  check=lambda o: "no done state" in o["error"])
         else:
-            step("a reply follows its comment", comments._reply_to_comment_impl, 1, "Agreed",
+            step("a reply follows its comment", comments._reply_to_comment_impl, 1, "Agreed ✓",
                  undo="Reply to comment",
-                 check=lambda o: (o["number"], o["reply_to"], o["text"], o["count"]) == (2, 1, "Agreed", 3))
+                 check=lambda o: (o["number"], o["reply_to"], o["text"], o["count"]) == (2, 1, "Agreed ✓", 3))
+            step("a reply to the reply goes to the comment", comments._reply_to_comment_impl, 2, "And?",
+                 undo="Reply to comment", check=lambda o: o["reply_to"] == 1 and o["count"] == 4)
             step("a comment is marked done", comments._resolve_comment_impl, 1, True,
                  undo="Resolve comment", check=lambda o: o["done"] is True)
-            step("deleting a comment takes its reply", comments._delete_comments_impl, [1], False,
+            step("the list says which are done and what each reply answers",
+                 comments._list_comments_impl, 1, 100,
+                 check=lambda o: [(c["number"], c.get("reply_to")) for c in o["comments"]]
+                 == [(1, None), (2, 1), (3, 1), (4, None)]
+                 and (o["comments"][0]["done"], o["comments"][3]["done"]) == (True, False))
+            step("deleting a comment takes its replies", comments._delete_comments_impl, [1], False,
                  undo="Delete comments",
-                 check=lambda o: (o["deleted"], o["left"]) == (2, 1) and "replies" in o["note"])
+                 check=lambda o: (o["deleted"], o["left"]) == (3, 1) and "replies" in o["note"])
         step("every comment goes", comments._delete_comments_impl, None, True,
              undo="Delete comments", check=lambda o: o["left"] == 0)
         step("and the text is as it was", text._get_paragraphs_impl, 1, 2, False,
@@ -847,6 +860,81 @@ def run_pdf_steps() -> None:
             if os.path.exists(path):
                 os.remove(path)
         step("close the document of PDFs", documents._close_document_impl, False)
+    finally:
+        call_document.reset(token)
+
+
+def _bridge_usable() -> bool:
+    """Whether the VBA bridge works in this Word (it is loaded on first use)."""
+    from ms_word_mcp.backend.bridge import Unavailable
+
+    def ping():
+        try:
+            return backend.word.vba.call(backend.word.get_app(), "Ping") == ["1"]
+        except Unavailable:
+            return False
+    return backend.word.execute(ping)
+
+
+def run_bridge_steps() -> None:
+    """Paragraphs read by the VBA bridge, against the same read without it."""
+    other = step("a document for the bridge", documents._create_document_impl, None, None)
+    if "error" in other:
+        return
+    token = call_document.set(other["full_name"])
+    try:
+        items = [{"text": "Bridge heading", "style": "Heading 1"},
+                 {"text": "English, 日本語 and 𠮷 in one paragraph.", "style": "Normal"},
+                 {"text": "A bold red paragraph.", "style": "Normal"},
+                 {"text": "Words to strike out stay here.", "style": "Normal"},
+                 {"text": "Second heading", "style": "Heading 2"}]
+        items += [{"text": f"Body paragraph {i} with a few words in it.", "style": "Normal"}
+                  for i in range(1, 196)]
+        made = step("200 paragraphs for the bridge", text._insert_paragraphs_impl, items, None, None)
+        if "error" in made:
+            return
+        step("one of them bold and red", formatting._format_text_impl, 3, None, None,
+             {"bold": True, "color": "#C00000"}, undo="Format text")
+        step("a table after them", tables._insert_table_impl, [["a", "b"], ["c", "d"]], 5, None,
+             None, None, None, None, None, None, None, undo="Insert table")
+        step("track changes on", revisions._set_track_changes_impl, True, undo="Track changes")
+        step("a tracked deletion", text._find_replace_impl, "to strike out ", "", True, False,
+             False, undo="Find and replace", check=lambda o: o["replaced"] == 1)
+        step("track changes off", revisions._set_track_changes_impl, False, undo="Track changes")
+        _bridge_usable()  # loaded on first use
+        if step("the bridge is loaded", documents._get_app_info_impl,
+                check=lambda o: o["vba_bridge"] == "on").get("vba_bridge") != "on":
+            step("close the document of the bridge", documents._close_document_impl, False)
+            return
+        timed = {}
+
+        def read(on, detail):
+            os.environ["WORD_VBA_BRIDGE"] = "on" if on else "off"
+            began = time.monotonic()
+            out = json.loads(_common.run(text._get_paragraphs_impl, 1, 200, detail))
+            timed[(on, detail)] = time.monotonic() - began
+            return out
+        try:
+            for detail in (False, True):
+                fast, slow = read(True, detail), read(False, detail)
+                differ = [(a, b) for a, b in zip(fast["paragraphs"], slow["paragraphs"]) if a != b]
+                if backend.IS_MACOS and detail:
+                    # The Mac's old read gives fewer fields and colors as RGB;
+                    # the bridge gives Windows' fields. Compared without detail.
+                    keep = ("index", "text", "style", "outline_level", "table", "deleted_text")
+                    differ = [(a, b) for a, b in differ
+                              if {k: a.get(k) for k in keep} != {k: b.get(k) for k in keep}]
+                record(f"the bridge reads as before{' with detail' if detail else ''}",
+                       len(fast["paragraphs"]) == len(slow["paragraphs"]) == 200 and not differ,
+                       {"paragraphs": [len(fast["paragraphs"]), len(slow["paragraphs"])],
+                        "differ": differ[:3], "seconds": [round(timed[(True, detail)], 2),
+                                                          round(timed[(False, detail)], 2)]})
+        finally:
+            os.environ.pop("WORD_VBA_BRIDGE", None)
+        step("the tracked deletion reads as struck out", text._get_paragraphs_impl, 4, 4, True,
+             check=lambda o: o["paragraphs"][0].get("deleted_text") == "to strike out "
+             and "fonts" in o["paragraphs"][0])
+        step("close the document of the bridge", documents._close_document_impl, False)
     finally:
         call_document.reset(token)
 

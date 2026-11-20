@@ -11,7 +11,8 @@ On Word for Mac a comment is made with `make new Word comment at <document>`,
 its scope and its text both given as properties. Made with the scope alone,
 Word for Mac ended its process (measured on 16.114, 2026-11-20, and in
 scripts/probes/mac_comments_revisions.py). Its scripting has no replies and no
-done state, so those two tools say so there.
+done state; they go through the VBA bridge (backend/bridge.py), and when it
+cannot be used those two tools say why.
 """
 
 from __future__ import annotations
@@ -27,11 +28,13 @@ from .revisions import when
 ON_SHOWN = 200
 
 NO_REPLIES_ON_MAC = (
-    "Word for Mac's scripting has no replies to comments, so this works on Windows only. "
-    "On the Mac, add a comment of its own on the same text (word_add_comment).")
+    "Word for Mac's scripting has no replies to comments, and ms-word-mcp's VBA bridge, "
+    "which adds them, cannot be used with this Word ({why}). Add a comment of its own on "
+    "the same text instead (word_add_comment).")
 NO_DONE_ON_MAC = (
-    "Word for Mac's scripting has no done state for comments, so this works on Windows "
-    "only. On the Mac, delete the comment once it is dealt with (word_delete_comments).")
+    "Word for Mac's scripting has no done state for comments, and ms-word-mcp's VBA "
+    "bridge, which adds it, cannot be used with this Word ({why}). Delete the comment "
+    "once it is dealt with instead (word_delete_comments).")
 
 
 def _one_paragraph(text: str) -> str:
@@ -257,6 +260,46 @@ def _mac_describe(doc, number: int, comment) -> dict:
             "date": when(comment.date_value.get())}
 
 
+def _mac_bridge(doc, what: str, *fields: str, refused: str | None = None):
+    """Ask the VBA bridge about this document. None when it cannot be used, or
+    with `refused`, that message, saying why."""
+    from . import mac as m
+    from ..backend.bridge import BridgeError, Unavailable, encode
+
+    word = backend.word
+    try:
+        vba = getattr(word, "vba", None)
+        if vba is None:
+            raise Unavailable("this server has no bridge")
+        return vba.call(word.get_app(), what, encode(m._full(doc)), *fields)
+    except Unavailable as exc:
+        if refused:
+            raise ValueError(refused.format(why=exc)) from None
+        return None
+    except BridgeError as exc:
+        raise ValueError(f"Word refused it: {exc}") from None
+
+
+def _mac_states(doc) -> dict | None:
+    """Each comment's done state and the comment it replies to, by number;
+    None when the bridge cannot be used."""
+    lines = _mac_bridge(doc, "CommentState")
+    if lines is None:
+        return None
+    rows = [[int(x) for x in line.split(",")] for line in lines]
+    by_start = {own: n for n, (_, _, own) in enumerate(rows, 1)}
+    return {n: {"done": bool(done), **({"reply_to": by_start.get(parent)} if parent >= 0 else {})}
+            for n, (done, parent, _) in enumerate(rows, 1)}
+
+
+def _mac_find(doc, number: int, states=None) -> dict:
+    described = _mac_describe(doc, number, doc.Word_comments[number])
+    states = _mac_states(doc) if states is None else states
+    if states:
+        described.update(states.get(number, {}))
+    return described
+
+
 @mac_impl(_add_comment_impl)
 def _mac_add_comment(index, text, on):
     from . import mac as m
@@ -269,8 +312,7 @@ def _mac_add_comment(index, text, on):
     comment = doc.make(new=k.Word_comment, at=doc,
                        with_properties={k.scope: scope, k.comment_text: text})
     number = int(comment.comment_index.get())
-    return {"success": True, **_mac_describe(doc, number, doc.Word_comments[number]),
-            "count": _mac_count(doc)}
+    return {"success": True, **_mac_find(doc, number), "count": _mac_count(doc)}
 
 
 @mac_impl(_list_comments_impl)
@@ -278,26 +320,42 @@ def _mac_list_comments(start, limit):
     doc = backend.word.document()
     count = _mac_count(doc)
     last = min(count, start + limit - 1)
-    out = [_mac_describe(doc, n, doc.Word_comments[n]) for n in range(start, last + 1)]
+    states = _mac_states(doc) or {}
+    out = [{**_mac_describe(doc, n, doc.Word_comments[n]), **states.get(n, {})}
+           for n in range(start, last + 1)]
     return listing(out, count, start)
 
 
 @mac_impl(_reply_to_comment_impl)
 def _mac_reply_to_comment(number, text):
-    raise ValueError(NO_REPLIES_ON_MAC)
+    doc = backend.word.document()
+    check_number(number, _mac_count(doc))
+    from ..backend.bridge import encode
+
+    lines = _mac_bridge(doc, "Reply", str(number), encode(text), refused=NO_REPLIES_ON_MAC)
+    return {"success": True, **_mac_find(doc, int(lines[0])), "count": int(lines[1])}
 
 
 @mac_impl(_resolve_comment_impl)
 def _mac_resolve_comment(number, done):
-    raise ValueError(NO_DONE_ON_MAC)
+    doc = backend.word.document()
+    check_number(number, _mac_count(doc))
+    _mac_bridge(doc, "SetDone", str(number), "1" if done else "0", refused=NO_DONE_ON_MAC)
+    return {"success": True, **_mac_find(doc, number)}
 
 
 @mac_impl(_delete_comments_impl)
 def _mac_delete_comments(numbers, every):
     doc = backend.word.document()
     before = _mac_count(doc)
-    # One at a time from the last: `delete all comments` is refused (-1708).
     order = list(range(before, 0, -1)) if every else highest_first(numbers, before)
+    # Through the bridge when it is there: Word for Mac's `delete` leaves a
+    # comment that has replies where it is (measured on 16.114).
+    lines = _mac_bridge(doc, "DeleteComments", ",".join(map(str, order))) if order else None
+    if lines is not None:
+        left, asked = int(lines[0]), int(lines[1])
+        return deleted(len(order) if every else asked, before, left)
+    # One at a time from the last: `delete all comments` is refused (-1708).
     for number in order:
         doc.Word_comments[number].delete()
     return deleted(len(order), before, _mac_count(doc))
@@ -318,23 +376,23 @@ def register(mcp) -> None:
     async def word_list_comments(params: ListCommentsInput) -> str:
         """The comments, in order: each one's number, the paragraph its text
         starts in (`index`), the text it is about (`on`), the comment, its
-        author, initials and date. On Windows also whether it is done, and for a
-        reply, the comment it answers (`reply_to`); on the Mac a reply is listed
-        as a comment of its own."""
+        author, initials and date, whether it is done, and for a reply, the
+        comment it answers (`reply_to`). On the Mac, the last two need
+        ms-word-mcp's VBA bridge, and are left out when it cannot be used."""
         p = params
         return await call(_list_comments_impl, p.start, p.limit)
 
     @mcp.tool(name="word_reply_to_comment", annotations=annotations("Reply to a comment", WRITES))
     async def word_reply_to_comment(params: ReplyInput) -> str:
-        """Reply to a comment; a reply to a reply goes to its comment. Windows
-        only: Word for Mac's scripting has no replies."""
+        """Reply to a comment; a reply to a reply goes to its comment. On the
+        Mac this goes through ms-word-mcp's VBA bridge."""
         p = params
         return await call(_reply_to_comment_impl, p.number, p.text, undo="Reply to comment")
 
     @mcp.tool(name="word_resolve_comment", annotations=annotations("Resolve a comment", WRITES))
     async def word_resolve_comment(params: ResolveCommentInput) -> str:
-        """Mark a comment done, or open it again. Windows only: Word for Mac's
-        scripting has no done state."""
+        """Mark a comment done, or open it again. On the Mac this goes through
+        ms-word-mcp's VBA bridge."""
         p = params
         return await call(_resolve_comment_impl, p.number, p.done, undo="Resolve comment")
 

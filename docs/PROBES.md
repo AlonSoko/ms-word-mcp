@@ -367,3 +367,21 @@ listing stops after 40 s and says where to go on.
 
 Because a search matches text marked deleted, a replacement run a second time
 would replace it again. The search leaves those matches out.
+
+## The VBA bridge (Word 16, both platforms)
+
+Measured 2026-11-20 on Word for Mac 16.114 and Word for Windows (Microsoft 365,
+x64), with `ms-word-mcp-bridge.dotm` built by Word for Windows from
+`backend/vba/WordMcpBridge.bas` (`scripts/build_vba_bridge.py`; Word's
+AccessVBOM is turned on for the build only and was unset before and after).
+`run_bridge_steps` in `scripts/live_check.py` repeats the comparisons.
+
+| What | Windows | Mac |
+|---|---|---|
+| Loading the template into a running Word | `AddIns.Add(path, Install=True)`, no prompt, also with macros set to "disable all without notification" (VBAWarnings 4) and "with notification" (2) | The scripting has no command that adds an add-in, and the Startup folder is read only as Word starts. `open` of the template makes a new document attached to it, whose macros run (automation security low); `AddIns.Add` in that macro makes the template global, and the document is closed. The app in front stays in front |
+| After Word restarts | Not loaded | Listed in the add-ins, not installed, macros not there (-1708); `delete` of the add-in takes it out of the list |
+| One request | `Application.Run("WordMcpRun", what, request)`, the answer as its value | `run VB macro` passes and answers nothing: a request file, the macro, an answer file, 8-35 ms |
+| A missing macro | A COM error | -1708 |
+| 200 paragraphs, `word_get_paragraphs` | 0.28 s against 8.1 s; with `detail` 0.30 s against 11.7 s. The answers are the same, field for field | 0.45 s against 6.9 s; with `detail` 0.53 s against 26.9 s. Text, style, level, tables and deletions the same |
+| `detail` on the Mac, the bridge against Apple Events | | A paragraph half bold: `bold` mixed (null), where Apple Events said false. A Heading 1 in its theme color: no color, as on Windows, where Apple Events said `#FFBF00`. Automatic color: no color, where Apple Events said `#000000`. `size_complex_script` given |
+| Comments | | `Replies.Add`, `Done` and `Ancestor` work; Apple Events then list a reply as a comment of its own. Marking a comment done marks its replies done. `delete` of a comment that has replies leaves it where it is (deleted 0); `DeleteRecursively` through the bridge takes it and its replies |

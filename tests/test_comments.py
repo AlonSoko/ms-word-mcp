@@ -307,6 +307,77 @@ def test_on_the_mac_comments_are_deleted_one_at_a_time_from_the_last(mac_doc):
     (comments._mac_reply_to_comment, (1, "x"), "no replies"),
     (comments._mac_resolve_comment, (1, True), "no done state"),
 ])
-def test_on_the_mac_replies_and_the_done_state_say_why_they_cannot(impl, args, says):
-    with pytest.raises(ValueError, match=says):
+def test_on_the_mac_without_the_bridge_replies_and_done_say_why_they_cannot(mac_doc, impl, args, says):
+    mac_doc("One.")
+    comments._mac_add_comment(1, "c", None)
+    with pytest.raises(ValueError, match=f"{says}.*cannot be used with this Word \\(this server has no bridge\\)"):
         impl(*args)
+
+
+class _Vba:
+    """The bridge, answering for a document whose comment 2 replies to comment 1."""
+
+    def __init__(self):
+        self.asked = []
+
+    def call(self, app, what, *fields):
+        self.asked.append((what, *fields[1:]))
+        if what == "CommentState":
+            return ["0,-1,0", "1,0,5", "0,-1,9"]
+        if what == "Reply":
+            return ["2", "3"]
+        if what == "SetDone":
+            return ["1"]
+        if what == "DeleteComments":
+            return ["1", "1"]  # comment 1 and its reply went, one number was asked
+        raise AssertionError(what)
+
+
+@pytest.fixture
+def mac_doc_with_bridge(mac_doc, monkeypatch):
+    def make(*paragraphs):
+        doc = mac_doc(*paragraphs)
+        vba = _Vba()
+        monkeypatch.setattr(comments.backend, "word", SimpleNamespace(
+            document=lambda: doc, vba=vba, get_app=lambda: None))
+        monkeypatch.setattr(mac, "_full", lambda d: "/d/Report.docx")
+        for i in range(1, len(paragraphs) + 1):
+            comments._mac_add_comment(i, f"c{i}", None)
+        return doc, vba
+    return make
+
+
+def test_on_the_mac_the_bridge_gives_the_done_state_and_what_a_reply_answers(mac_doc_with_bridge):
+    _, vba = mac_doc_with_bridge("One.", "Two.", "Three.")
+    out = comments._mac_list_comments(1, 10)["comments"]
+    assert [(c["number"], c["done"], c.get("reply_to")) for c in out] == [
+        (1, False, None), (2, True, 1), (3, False, None)]
+    assert vba.asked[-1] == ("CommentState",)
+
+
+def test_on_the_mac_a_reply_goes_through_the_bridge(mac_doc_with_bridge):
+    _, vba = mac_doc_with_bridge("One.", "Two.", "Three.")
+    out = comments._mac_reply_to_comment(1, "Agreed")
+    assert ("Reply", "1", "65,103,114,101,101,100") in vba.asked
+    assert (out["number"], out["reply_to"], out["count"]) == (2, 1, 3)
+
+
+def test_on_the_mac_done_goes_through_the_bridge(mac_doc_with_bridge):
+    _, vba = mac_doc_with_bridge("One.", "Two.", "Three.")
+    out = comments._mac_resolve_comment(2, True)
+    assert ("SetDone", "2", "1") in vba.asked and out["done"] is True
+
+
+def test_on_the_mac_a_comment_that_is_not_there_is_refused_before_the_bridge(mac_doc_with_bridge):
+    _, vba = mac_doc_with_bridge("One.")
+    with pytest.raises(ValueError, match="There is no comment 4"):
+        comments._mac_resolve_comment(4, True)
+    assert not any(a[0] == "SetDone" for a in vba.asked)
+
+
+def test_on_the_mac_a_comment_and_its_replies_are_deleted_through_the_bridge(mac_doc_with_bridge):
+    """Word for Mac's own `delete` leaves a comment that has replies."""
+    doc, vba = mac_doc_with_bridge("One.", "Two.", "Three.")
+    out = comments._mac_delete_comments([1], False)
+    assert ("DeleteComments", "1") in vba.asked and doc.deleted == []
+    assert (out["deleted"], out["left"]) == (2, 1) and "replies" in out["note"]

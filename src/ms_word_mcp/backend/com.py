@@ -71,11 +71,18 @@ def names_of(doc) -> tuple[str, str]:
 class ComWord(Worker):
     """The worker, connected to Word over COM."""
 
+    def __init__(self) -> None:
+        super().__init__()
+        from .bridge import Bridge
+
+        self.vba = Bridge("windows")
+
     def thread_setup(self) -> None:
         if pythoncom is not None:
             pythoncom.CoInitializeEx(pythoncom.COINIT_APARTMENTTHREADED)
 
     def thread_teardown(self) -> None:
+        self.vba.remove()
         if pythoncom is not None:
             pythoncom.CoUninitialize()
 

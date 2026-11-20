@@ -271,8 +271,10 @@ Word has no dictionary for is never checked, and `word_set_language` fixes that.
 `word_add_comment` puts a comment on a paragraph, or on some text in it
 (`on`). Word signs it as the Office user, whatever name is asked for.
 `word_list_comments` numbers them in the order of the text they are about;
-the numbers move when one is added or deleted. Replying and marking a comment
-done work on Windows only.
+the numbers move when one is added or deleted. On the Mac, replying, marking a
+comment done, and listing which comment a reply answers go through
+ms-word-mcp's VBA bridge; `word_get_app_info` says whether it works
+(`vba_bridge`).
 
 ## Paragraph numbers
 
@@ -563,8 +565,7 @@ async def word_describe(names: list[str] | None = None) -> str:
     """
     if not names:
         return (catalog_lines() + "\n\nParagraph direction (right to left), tab stops, "
-                "adding table columns, and replying to or resolving a comment work on "
-                "Windows only."
+                "and adding table columns work on Windows only."
                 "\n\nNext: word_describe(names=[...]) for the arguments of the tools "
                 "you will use, then word_run or word_run_steps.")
     found, missing = {}, []

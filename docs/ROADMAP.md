@@ -77,8 +77,9 @@ follows what the owner asked for in ykuwai/ppt-mcp#352 and since.
   report the text as Word shows it, deletions apart.
 
 - Comments: add one on a paragraph or on some text in it, list them with the
-  text each is about, delete them by number or all at once; on Windows, reply
-  and mark one done. Word for Mac's scripting has no replies or done state.
+  text each is about, delete them by number or all at once, reply and mark one
+  done. Word for Mac's scripting has no replies or done state; on the Mac they
+  go through the VBA bridge (backend/bridge.py).
 
 - Checks: Word's spelling and grammar findings and the language the text is
   checked in, marking text with a language, and a health check before sending
@@ -110,11 +111,10 @@ First, fixes to what is there, for long documents (PROBES.md, Reading):
 - **word_find_replace** on Windows finds about 40 matches a second, match by
   match, so thousands take several calls (docs/PROBES.md, Replacing many
   matches).
-- **word_get_paragraphs** still asks Word three or more times a paragraph
-  (up to 200 a call; 200 with `detail` took 22 s on Windows and 55 s on the
-  Mac). A read now stops after 40 s and says where to go on. The styles could
-  come from the document's XML on Windows (Content.WordOpenXML) and through
-  VBA on the Mac.
+- **word_get_paragraphs** now reads through the VBA bridge, in one call to
+  Word (200 paragraphs with `detail`: 0.30 s instead of 11.7 s on Windows,
+  0.53 s instead of 27 s on the Mac). Without the bridge it asks Word three or
+  more times a paragraph, as before, and stops after 40 s.
 - **word_insert_paragraphs** now sets a style on each run of paragraphs
   that share it and reads the text back in one call (1,000 paragraphs:
   4.5 s instead of 49 s on Windows, 6.5 s instead of 57 s on the Mac).

@@ -16,6 +16,12 @@ SAVE_FORMATS = {".docx": 16, ".docm": 13, ".dotx": 14, ".doc": 0, ".rtf": 6,
                 ".txt": 2, ".pdf": 17, ".odt": 23, ".htm": 8, ".html": 8}
 
 
+def vba_bridge_state(word) -> str:
+    """Whether the VBA bridge (backend/bridge.py) works in this Word."""
+    vba = getattr(word, "vba", None)
+    return vba.state() if vba is not None else "off (this server has none)"
+
+
 def _doc_summary(doc) -> dict:
     name, full_name = names_of(doc)
     return {"name": name, "full_name": full_name, "saved": bool(doc.Saved),
@@ -51,6 +57,7 @@ def _get_app_info_impl():
         "active_document": active,
         "target_document": word.target_full_name,
         "started_by_server": word.launched_by_us,
+        "vba_bridge": vba_bridge_state(word),
     }
 
 

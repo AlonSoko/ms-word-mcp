@@ -247,7 +247,8 @@ def get_app_info():
                           for d in docs],
             "active_document": docs[0].full_name if docs else None,
             "target_document": word.target_full_name,
-            "started_by_server": word.launched_by_us}
+            "started_by_server": word.launched_by_us,
+            "vba_bridge": documents.vba_bridge_state(word)}
 
 
 @mac_impl(documents._list_documents_impl)
@@ -402,14 +403,18 @@ def get_paragraphs(start, end, detail):
                start + MAX_PARAGRAPHS_PER_READ - 1)
     from .tables import mac_mark_tables
 
-    read = []
-    # Paragraph by paragraph, so a read that runs out of time stops within its
-    # budget; a document with no changes need not ask for each.
-    spans = None if _has_revisions(doc) else []
-    for i in range(start, last + 1):
-        read.append(_info(doc, i, detail, spans))
-        if time.monotonic() > began + text_tools.READ_SECONDS:
-            break
+    changes = _has_revisions(doc)
+    read = text_tools.bridge_paragraphs(lambda: _full(doc), start, last, detail, changes, began,
+                                        lambda i: _info(doc, i, False, None))
+    if read is None:
+        read = []
+        # Paragraph by paragraph, so a read that runs out of time stops within
+        # its budget; a document with no changes need not ask for each.
+        spans = None if changes else []
+        for i in range(start, last + 1):
+            read.append(_info(doc, i, detail, spans))
+            if time.monotonic() > began + text_tools.READ_SECONDS:
+                break
     out = {"success": True, "paragraphs": read, "count": count}
     mac_mark_tables(doc, read)
     text_tools.finish_reading(out, last, count)
