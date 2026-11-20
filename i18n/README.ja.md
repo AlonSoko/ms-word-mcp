@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <strong>Windows と macOS の Microsoft Word をリアルタイムに操作——<br>あなたの隣で同じ文書を編集する、<!--tools-->100<!--/tools--> ツールの MCP サーバー</strong>
+  <strong>Windows と macOS の Microsoft Word をリアルタイムに操作——<br>あなたの隣で同じ文書を編集する、<!--tools-->101<!--/tools--> ツールの MCP サーバー</strong>
 </p>
 
 ---
@@ -185,7 +185,7 @@ Windows では、対象が Word のアクティブな文書のとき、1 回の�
 
 ### 🧮 数式
 
-`word_insert_equation` は LaTeX または UnicodeMath を受け取り、Word 自身の数式エディターで組み立てます。`numbered` を付けると、番号は右端にフィールドとして入るので、数式を挿入すると以降の番号が振り直されます。
+`word_insert_equation` は LaTeX または UnicodeMath を受け取り、Word 自身の数式エディターで組み立てます。`numbered` を付けると、番号は右端にフィールドとして入るので、数式を挿入すると以降の番号が振り直されます。`word_insert_inline_equation` は段落の文中に数式を入れます（文の先頭・末尾、またはプレースホルダーの位置）。`word_get_equation` と `word_set_equation` は段落の中の何番目か（`nth`）で指定します。
 
 ### 🖼️ 図形と浮動の画像
 

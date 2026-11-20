@@ -480,3 +480,17 @@ Measured 2026-11-20; `run_group_steps` in `scripts/live_check.py` repeats it.
 | The shapes' names after ungrouping | The names they had in the group: read from `GroupItems` before | The same |
 | A group moved by `dleft` | Its shapes move together | The same |
 
+## Inline equations (Word 16, both platforms)
+
+Measured 2026-11-20; `run_inline_equation_steps` in `scripts/live_check.py`
+repeats it.
+
+| What | Answer |
+|---|---|
+| UnicodeMath written among a paragraph's words, made a math zone (`OMaths.Add`; on the Mac `create new equation`) and built up | An inline equation: `Type` 1 (`display type` inline), set in the line's text |
+| A paragraph's equations | `Range.OMaths` (on the Mac the math objects starting in it) in order: the n-th is the n-th from the start |
+| Linearized, an inline equation's own range | Its UnicodeMath alone; the paragraph's text holds the words around it too |
+| An inline equation's range rewritten while linear, then built up | The words around it stay; the other equations in the paragraph are as they were |
+| Read back | In Word's math letters (𝐸=𝑚𝑐^2), as display equations |
+| `word_get_paragraphs` on a paragraph with a built-up equation | Its structure shows as paragraph marks inside the text (𝑚\r1\r), as for display equations |
+

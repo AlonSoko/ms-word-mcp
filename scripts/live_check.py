@@ -270,6 +270,7 @@ def run_steps(path: str) -> None:
     run_list_of_figures_steps()
     run_equation_edit_steps()
     run_equation_reference_steps()
+    run_inline_equation_steps()
     run_picture_and_page_steps(Path(path).parent)
     run_review_steps()
     run_heading_number_steps()
@@ -1945,6 +1946,66 @@ def run_group_steps() -> None:
         step("and ungrouped", shapes._ungroup_shape_impl, 1, undo="Ungroup shape",
              check=lambda o: len(o.get("shapes", [])) == 2)
         step("close the document for grouping", documents._close_document_impl, False)
+    finally:
+        call_document.reset(token)
+
+
+def _plain(math: str) -> str:
+    """Word's math letters (𝐸, 𝑚) as plain ones, without spaces."""
+    import unicodedata
+
+    return unicodedata.normalize("NFKC", math).replace(" ", "")
+
+
+def run_inline_equation_steps() -> None:
+    """Equations among a paragraph's words."""
+    other = step("a document for inline equations", documents._create_document_impl, None,
+                 None)
+    if "error" in other:
+        return
+    token = call_document.set(other["full_name"])
+    try:
+        made = step("a paragraph with a placeholder", text._insert_paragraphs_impl,
+                    [{"text": "Energy follows, where X is the mass: ", "style": "Normal"}],
+                    None, None)
+        if "error" in made:
+            return
+        step("an equation at the end of the text", equations._insert_inline_equation_impl, 1,
+             "E=mc^2", "latex", "end", None, undo="Insert equation",
+             check=lambda o: o.get("inline") is True and o.get("nth") == 1
+             and "warnings" not in o)
+        step("an equation in place of the placeholder", equations._insert_inline_equation_impl,
+             1, "m_0", "latex", "end", "X", undo="Insert equation",
+             check=lambda o: o.get("inline") is True and o.get("nth") == 1)
+        step("both listed in the paragraph, inline, in order", equations._list_equations_impl,
+             check=lambda o: [(e["index"], e["nth"], e["display"]) for e in o["equations"]]
+             == [(1, 1, False), (1, 2, False)])
+        step("the words around them stay", text._get_paragraphs_impl, 1, 1, False,
+             check=lambda o: o["paragraphs"][0]["text"].startswith("Energy follows, where ")
+             and " is the mass: " in o["paragraphs"][0]["text"]
+             and "X" not in o["paragraphs"][0]["text"])
+        step("the second read on its own", equations._get_equation_impl, 1, 2,
+             check=lambda o: o.get("inline") is True
+             and _plain(o.get("unicodemath", "")) == "E=mc^2")
+        step("the first changed", equations._set_equation_impl, 1, "m_1", "latex", 1,
+             undo="Change equation", check=lambda o: o.get("inline") is True)
+        step("it reads as changed", equations._get_equation_impl, 1, 1,
+             check=lambda o: _plain(o.get("unicodemath", "")) == "m_1")
+        step("and the second as it was", equations._get_equation_impl, 1, 2,
+             check=lambda o: _plain(o.get("unicodemath", "")) == "E=mc^2")
+        step("the words still there", text._get_paragraphs_impl, 1, 1, False,
+             check=lambda o: o["paragraphs"][0]["text"].startswith("Energy follows, where ")
+             and " is the mass: " in o["paragraphs"][0]["text"])
+        step("an equation that is not there", equations._get_equation_impl, 1, 3,
+             check=lambda o: "not 3" in o.get("error", ""))
+        step("a display equation", equations._insert_equation_impl, "a^2+b^2=c^2", "latex",
+             False, "Equation", None, None, undo="Insert equation")
+        step("no inline equation in a display one", equations._insert_inline_equation_impl, 2,
+             "x", "latex", "end", None,
+             check=lambda o: "display equation" in o.get("error", ""))
+        step("a picture of the page", screen._get_page_image_impl, 1, None,
+             check=lambda o: o.get("page") == 1)
+        step("close the document for inline equations", documents._close_document_impl, False)
     finally:
         call_document.reset(token)
 
