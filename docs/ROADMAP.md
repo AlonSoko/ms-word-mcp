@@ -87,8 +87,9 @@ follows what the owner asked for in ykuwai/ppt-mcp#352 and since.
 
 - Pictures in line with the text, numbered captions under any label in any
   language, live cross-references to captions, equations and headings.
-- The page: paper, margins, columns, document grid, vertical text; headers,
-  footers and page numbers; ruby.
+- The page: paper, margins, columns, document grid, vertical text; section
+  breaks; headers and footers, of one paragraph or several, and page numbers;
+  ruby.
 
 - Tables: insert one filled with its cells (style, heading rows, grid
   lines, column widths and alignments, autofit, position), list and read
@@ -131,8 +132,7 @@ Then, ordered roughly by what the owner stressed.
    edits in a second window.
 7. Shapes, the rest. Grouping; shapes in headers and footers; moving a shape to
    another paragraph.
-8. Adding sections (section breaks); a header of several paragraphs.
-9. Page previews.
+8. Page previews.
 
 ## Platforms
 

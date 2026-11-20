@@ -264,6 +264,7 @@ def run_steps(path: str) -> None:
     run_note_steps()
     run_comment_steps()
     run_check_steps()
+    run_section_steps()
     run_revision_steps()
     run_link_steps()
     run_shape_steps()
@@ -681,6 +682,51 @@ def run_check_steps() -> None:
              check=lambda o: {"placeholder", "repeated_word", "blank_paragraphs"} <= set(o["counts"])
              and o["paragraphs"] == 5)
         step("close the document of checks", documents._close_document_impl, False)
+    finally:
+        call_document.reset(token)
+
+
+def run_section_steps() -> None:
+    """Section breaks, and a header of several paragraphs in each section."""
+    other = step("a document for sections", documents._create_document_impl, None, None)
+    if "error" in other:
+        return
+    token = call_document.set(other["full_name"])
+    try:
+        made = step("three paragraphs for sections", text._insert_paragraphs_impl,
+                    [{"text": "Chapter one.", "style": "Normal"},
+                     {"text": "Chapter two.", "style": "Normal"},
+                     {"text": "第三章。", "style": "Normal"}], None, None)
+        if "error" in made:
+            return
+        step("a header of two paragraphs", page._set_header_footer_impl, "header", None, "primary",
+             1, None, [{"text": "Example Ltd", "alignment": "left"},
+                       {"text": "1 Main Street · page {page}", "alignment": "right"}],
+             undo="Set header or footer",
+             check=lambda o: o["paragraphs"] == 2
+             and re.fullmatch(r"Example Ltd\r1 Main Street · page \d+", o["reads"]))
+        step("a section break after paragraph 1", page._insert_section_break_impl, 1, "next_page",
+             undo="Insert section break",
+             check=lambda o: (o["section"], o["sections"], o["starts_at"], o["paragraphs"])
+             == (2, 2, 3, 4))
+        step("the paragraphs after it moved down by one", text._get_paragraphs_impl, 3, 4, False,
+             check=lambda o: [p["text"] for p in o["paragraphs"]] == ["Chapter two.", "第三章。"])
+        step("section 2 gets a header of its own", page._set_header_footer_impl, "header",
+             "Second part", "primary", 2, "center", None, undo="Set header or footer",
+             check=lambda o: o["reads"] == "Second part" and "its own header" in o["note"])
+        step("each section's header reads back", page._get_headers_footers_impl,
+             check=lambda o: len(o["sections"]) == 2
+             and o["sections"][0]["header"]["primary"]["text"].startswith("Example Ltd\r")
+             and o["sections"][1]["header"]["primary"]["text"] == "Second part")
+        step("a continuous break after the last paragraph", page._insert_section_break_impl, 4,
+             "continuous", undo="Insert section break",
+             check=lambda o: (o["section"], o["sections"], o["starts_at"], o["paragraphs"]) == (3, 3, 5, 5)
+             and "empty paragraph" in o["note"])
+        step("three sections in the page setup", page._get_page_setup_impl,
+             check=lambda o: len(o["sections"]) == 3)
+        step("a paragraph that is not there is refused", page._insert_section_break_impl, 99,
+             "next_page", check=lambda o: "There is no paragraph 99" in o["error"])
+        step("close the document of sections", documents._close_document_impl, False)
     finally:
         call_document.reset(token)
 
@@ -1120,13 +1166,13 @@ def run_picture_and_page_steps(folder: Path) -> None:
                                  for t in o["tables"]))
         step("the reference followed", text._get_paragraphs_impl, at + 1, at + 1, False,
              undo=None, check=lambda o: "Figure 2" in o["paragraphs"][0]["text"])
-    step("a header", page._set_header_footer_impl, "header", "Live check", "primary", 1, "right",
+    step("a header", page._set_header_footer_impl, "header", "Live check", "primary", 1, "right", None,
          undo="Set header or footer", check=lambda o: o["reads"] == "Live check")
     step("a footer with the page number and count", page._set_header_footer_impl, "footer",
-         "Page {page} of {pages}", "primary", 1, "center", undo="Set header or footer",
+         "Page {page} of {pages}", "primary", 1, "center", None, undo="Set header or footer",
          check=lambda o: re.fullmatch(r"Page \d+ of \d+", o["reads"]))
     step("a first page of its own", page._set_header_footer_impl, "header", "", "first", 1, None,
-         undo="Set header or footer", check=lambda o: o["reads"] == "")
+         None, undo="Set header or footer", check=lambda o: o["reads"] == "")
     step("roman page numbers from 5", page._set_page_numbers_impl, 1, "lowercase_roman", 5, None,
          undo="Set page numbering",
          check=lambda o: o["style"] == "lowercase_roman" and o["start_at"] == 5)
