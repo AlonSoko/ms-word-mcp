@@ -564,8 +564,9 @@ async def word_describe(names: list[str] | None = None) -> str:
     with word_describe().
     """
     if not names:
-        return (catalog_lines() + "\n\nParagraph direction (right to left), tab stops, "
-                "and adding table columns work on Windows only."
+        return (catalog_lines() + "\n\nOn macOS, paragraph direction (right to left), tab "
+                "stops, adding table columns and creating a style go through ms-word-mcp's "
+                "VBA bridge; word_get_app_info says whether it works (vba_bridge)."
                 "\n\nNext: word_describe(names=[...]) for the arguments of the tools "
                 "you will use, then word_run or word_run_steps.")
     found, missing = {}, []

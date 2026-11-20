@@ -18,7 +18,7 @@ Option Explicit
 
 ' Raise it, and VERSION in backend/bridge.py, with any change to this module:
 ' a server that finds another version loaded in Word replaces it.
-Public Const BRIDGE_VERSION As String = "2"
+Public Const BRIDGE_VERSION As String = "3"
 Private Const REQUEST_FILE As String = "ms-word-mcp-bridge.request"
 Private Const ANSWER_FILE As String = "ms-word-mcp-bridge.answer"
 Private Const TEMPLATE_FILE As String = "ms-word-mcp-bridge.dotm"
@@ -115,6 +115,8 @@ Private Function Dispatch(what As String, r As Variant) As String
         Case "CommentState": Dispatch = CommentState(r)
         Case "DeleteComments": Dispatch = DeleteComments(r)
         Case "FindReplace": Dispatch = FindReplace(r)
+        Case "Member": Dispatch = Member(r)
+        Case "AddStyle": Dispatch = AddStyle(r)
         Case Else: Err.Raise 5, , "The bridge has no request called " & what
     End Select
     Exit Function
@@ -229,6 +231,191 @@ End Function
 Private Function AncestorOf(c As Comment) As Comment
     On Error Resume Next
     Set AncestorOf = c.Ancestor
+End Function
+
+' -- members of Word's object model, for what Word for Mac's scripting lacks --
+'
+' request: document, then an operation a line: how|path|member|argument|...
+' how: get, let (one argument) or call. The path goes from the document,
+' "/" between members, each Name or Name(argument;argument). An argument is
+' n<number> (Str's period), s<UTF-16 units>, b1 or b0, or p<path> for an
+' object. answer: a line an operation: n<number>, s<units>, b1/b0, o for an
+' object, or e for nothing.
+Private Function Member(r As Variant) As String
+    Dim d As Document, i As Long, parts() As String, target As Object, args As Variant
+    Dim lines() As String, n As Long, got As Variant, j As Long
+    Set d = FindDocument(Decode(CStr(r(0))))
+    ReDim lines(UBound(r))
+    lines(0) = "ok"
+    n = 1
+    For i = 1 To UBound(r)
+        If Len(r(i)) > 0 Then
+            parts = Split(CStr(r(i)), "|")
+            Set target = Resolve(d, CStr(parts(1)))
+            If UBound(parts) >= 3 Then
+                ReDim args(UBound(parts) - 3)
+                For j = 3 To UBound(parts)
+                    Arg d, CStr(parts(j)), args, j - 3
+                Next j
+            Else
+                args = Array()
+            End If
+            On Error GoTo Failed
+            Select Case parts(0)
+                Case "get": got = Invoke(target, CStr(parts(2)), VbGet, args)
+                Case "call": got = Invoke(target, CStr(parts(2)), VbMethod, args)
+                Case "let"
+                    Assign target, CStr(parts(2)), args(0)
+                    got = Array(Empty)
+                Case Else: Err.Raise 5, , "No such operation: " & parts(0)
+            End Select
+            On Error GoTo 0
+            lines(n) = Typed(got)
+            n = n + 1
+        End If
+    Next i
+    ReDim Preserve lines(n - 1)
+    Member = Join(lines, vbLf)
+    Exit Function
+Failed:
+    Err.Raise Err.Number, , Err.Description & " (" & parts(0) & " " & parts(2) & ")"
+End Function
+
+' A property set. Word for Mac's VBA does not pass a value through
+' CallByName (measured), so the ones the server sets are assigned by name.
+Private Sub Assign(target As Object, name As String, value As Variant)
+    Select Case LCase$(name)
+        Case "sizebi": target.SizeBi = value
+        Case "underlinecolor": target.UnderlineColor = value
+        Case "readingorder": target.ReadingOrder = value
+        Case "quickstyle": target.QuickStyle = value
+        Case "priority": target.Priority = value
+        Case "alternativetext": target.AlternativeText = value
+        Case "verticalanchor": target.VerticalAnchor = value
+        Case Else
+            If IsObject(value) Then
+                CallByName target, name, VbSet, value
+            Else
+                CallByName target, name, VbLet, value
+            End If
+    End Select
+End Sub
+
+' A member's value, in a one-item array: an object stays an object there,
+' where assigning it would read its default member.
+Private Function Invoke(target As Object, name As String, how As VbCallType, args As Variant) As Variant
+    ' Word for Mac's VBA does not pass arguments through CallByName (measured:
+    ' Range(0, 5) answered error 1004, Paragraphs.Item(1) an overflow), so the
+    ' members called with arguments are called by name.
+    Select Case LCase$(name) & "/" & (UBound(args) + 1)
+        Case "range/2": Invoke = Array(target.Range(args(0), args(1)))
+        Case "item/1": Invoke = Array(target.Item(args(0)))
+        Case "add/0": Invoke = Array(target.Add())
+        Case "add/1": Invoke = Array(target.Add(args(0)))
+        Case "add/3": Invoke = Array(target.Add(args(0), args(1), args(2)))
+        Case Else: Invoke = Called(target, name, how, args)
+    End Select
+End Function
+
+Private Function Called(target As Object, name As String, how As VbCallType, args As Variant) As Variant
+    Select Case UBound(args)
+        Case -1: Called = Array(CallByName(target, name, how))
+        Case 0: Called = Array(CallByName(target, name, how, args(0)))
+        Case 1: Called = Array(CallByName(target, name, how, args(0), args(1)))
+        Case 2: Called = Array(CallByName(target, name, how, args(0), args(1), args(2)))
+        Case 3: Called = Array(CallByName(target, name, how, args(0), args(1), args(2), args(3)))
+        Case Else: Err.Raise 5, , "Too many arguments for " & name
+    End Select
+End Function
+
+Private Function Typed(got As Variant) As String
+    If IsObject(got(0)) Then
+        If got(0) Is Nothing Then Typed = "e" Else Typed = "o"
+    ElseIf IsEmpty(got(0)) Or IsNull(got(0)) Then
+        Typed = "e"
+    ElseIf VarType(got(0)) = vbBoolean Then
+        Typed = IIf(got(0), "b1", "b0")
+    ElseIf VarType(got(0)) = vbString Then
+        Typed = "s" & Encode(CStr(got(0)))
+    Else
+        Typed = "n" & Num(got(0))
+    End If
+End Function
+
+Private Sub Arg(d As Document, code As String, args As Variant, at As Long)
+    Select Case Left$(code, 1)
+        Case "n"
+            If InStr(code, ".") = 0 And InStr(UCase$(code), "E") = 0 Then
+                args(at) = CLng(Mid$(code, 2))
+            Else
+                args(at) = Val(Mid$(code, 2))
+            End If
+        Case "s": args(at) = Decode(Mid$(code, 2))
+        Case "b": args(at) = (Mid$(code, 2) = "1")
+        Case "p": Set args(at) = Resolve(d, Mid$(code, 2))
+        Case Else: Err.Raise 5, , "No such argument: " & code
+    End Select
+End Sub
+
+Private Function Resolve(d As Document, path As String) As Object
+    Dim steps() As String, i As Long, name As String, inside As String, at As Long
+    Dim args As Variant, codes() As String, j As Long, here As Object, got As Variant
+    Set here = d
+    If Len(path) > 0 Then
+        steps = Split(path, "/")
+        For i = 0 To UBound(steps)
+            at = InStr(steps(i), "(")
+            If at > 0 Then
+                name = Left$(steps(i), at - 1)
+                inside = Mid$(steps(i), at + 1, Len(steps(i)) - at - 1)
+                codes = Split(inside, ";")
+                ReDim args(UBound(codes))
+                For j = 0 To UBound(codes)
+                    Arg d, CStr(codes(j)), args, j
+                Next j
+                got = Invoke(here, name, VbMethod, args)
+            Else
+                got = Invoke(here, CStr(steps(i)), VbGet, Array())
+            End If
+            Set here = got(0)
+        Next i
+    End If
+    Set Resolve = here
+End Function
+
+' request: document, name, type (1 paragraph, 2 character), base style (its
+' local name, or nothing for Normal or Default Paragraph Font). A new style
+' takes the formatting at the user's cursor, so it is given its base style's
+' font and paragraph format, as tools/formatting.py does on Windows.
+' answer: the new style's local name.
+Private Function AddStyle(r As Variant) As String
+    Dim d As Document, s As Style, base As Style, kind As Long, stage As String
+    On Error GoTo Failed
+    stage = "find the document"
+    Set d = FindDocument(Decode(CStr(r(0))))
+    kind = CLng(r(2))
+    stage = "find the base style"
+    If Len(r(3)) > 0 Then
+        Set base = d.Styles(Decode(CStr(r(3))))
+    ElseIf kind = 1 Then
+        Set base = d.Styles(wdStyleNormal)
+    Else
+        Set base = d.Styles(wdStyleDefaultParagraphFont)
+    End If
+    stage = "add the style"
+    Set s = d.Styles.Add(Decode(CStr(r(1))), kind)
+    stage = "set its base style"
+    s.BaseStyle = base.NameLocal
+    stage = "give it its base style's font"
+    s.Font = base.Font.Duplicate
+    If kind = 1 Then
+        stage = "give it its base style's paragraph format"
+        s.ParagraphFormat = base.ParagraphFormat.Duplicate
+    End If
+    AddStyle = "ok" & vbLf & Encode(s.NameLocal)
+    Exit Function
+Failed:
+    Err.Raise Err.Number, , Err.Description & " (AddStyle: " & stage & ")"
 End Function
 
 ' Where the document's tracked deletions are, in order of their starts.

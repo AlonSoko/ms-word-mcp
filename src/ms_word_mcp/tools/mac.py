@@ -774,7 +774,50 @@ def _check_and_replace(doc, found, value, until, tracked, before=None):
 # -- formatting ------------------------------------------------------------------
 
 TABS_ON_MAC = ("tab_stops was not applied: Word for Mac's scripting cannot make tab "
-               "stops (measured: -1708). It works on Windows.")
+               "stops (measured: -1708), and ms-word-mcp's VBA bridge, which makes them, "
+               "cannot be used with this Word ({why}). It works on Windows.")
+
+
+def _bridged(doc, path: str, props, spec: dict, refused: dict, got: dict) -> None:
+    """Set and read back, through the VBA bridge, the given properties Word
+    for Mac's scripting lacks (Prop.mac None): COM's names and values, on
+    the object at `path` (tools/_vba.py). Without the bridge they stay refused,
+    saying why."""
+    from . import _vba
+
+    missing = [p for p in props if p.mac is None and p.com and p.name in spec]
+    if not missing:
+        return
+    why = _vba.usable()
+    if why:
+        for p in missing:
+            if p.name in refused:
+                refused[p.name] = _vba.NEEDS_BRIDGE.format(why=why)
+        return
+    obj = _vba.Remote(_full(doc), path)
+    for p in missing:
+        refused.pop(p.name, None)
+    refused.update(P.com_apply(obj, missing, spec))
+    got.update(P.com_read(obj, missing))
+
+
+def _bridged_tabs(doc, path: str, tab_stops) -> tuple[list | None, list[str]]:
+    """Tab stops through the VBA bridge: the custom stops read back, or None
+    and the warning when the bridge cannot be used."""
+    from . import _vba
+
+    why = _vba.usable()
+    if why:
+        return None, [TABS_ON_MAC.format(why=why)]
+    fmt = _vba.Remote(_full(doc), path)
+    _vba.apply_tab_stops(fmt, tab_stops)
+    return _vba.read_tab_stops(fmt), []
+
+
+def _range_path(start: int, end: int, *more) -> str:
+    from ._vba import path_of
+
+    return path_of(("Range", start, end), *more)
 
 @mac_impl(formatting._format_text_impl)
 def format_text(start, end, match, font):
@@ -796,6 +839,7 @@ def format_text(start, end, match, font):
         rng = doc.create_range(start=s, end_=e)
         refused = P.mac_apply(rng.font_object, P.FONT_PROPS, spec)
         got = P.mac_read(rng.font_object, P.FONT_PROPS)
+        _bridged(doc, _range_path(s, e, "Font"), P.FONT_PROPS, spec, refused, got)
         warnings += P.mismatches(spec, got, refused)
         readback.append({"text": _clean(rng.content.get())[:80],
                          **formatting.font_readback(got, spec)})
@@ -819,21 +863,36 @@ def set_paragraph_format(start, end, paragraph):
                                  spec.get("line_spacing"))
         refused.update(P.mac_apply_borders(doc.paragraphs[i], spec.get("borders")))
         P.mac_apply_shading(doc.paragraphs[i], spec.get("shading"))
+    span_start, span_end = _bounds(doc, start)[0], _bounds(doc, end)[1]
+    # What the scripting lacks goes on the whole span at once, as on Windows.
+    _bridged(doc, _range_path(span_start, span_end, "ParagraphFormat"), P.PARAGRAPH_PROPS,
+             spec, refused, {})
+    tab_warnings = []
+    if "tab_stops" in spec:
+        _, tab_warnings = _bridged_tabs(doc, _range_path(span_start, span_end, "ParagraphFormat"),
+                                        spec["tab_stops"])
     out, warnings = [], []
     for i in range(start, min(end, start + 49) + 1):
         fmt = doc.paragraphs[i].paragraph_format
         got = {**P.mac_read(fmt, P.PARAGRAPH_PROPS), **P.mac_read_line_spacing(fmt)}
+        here = _bounds(doc, i)
+        _bridged(doc, _range_path(*here, "ParagraphFormat"), P.PARAGRAPH_PROPS, spec, {}, got)
+        if "tab_stops" in spec and not tab_warnings:
+            from . import _vba
+
+            got["tab_stops"] = _vba.read_tab_stops(
+                _vba.Remote(_full(doc), _range_path(*here, "ParagraphFormat")))
         if "borders" in spec:
             got["borders"] = P.mac_read_borders(doc.paragraphs[i])
         if "shading" in spec:
             got["shading"] = P.mac_read_shading(doc.paragraphs[i])
         if not warnings:
-            warnings = P.mismatches(spec, got, refused) + P.border_mismatches(spec, got)
+            warnings = (P.mismatches(spec, got, refused) + P.border_mismatches(spec, got)
+                        + formatting._tab_mismatch(spec, got))
         info = _info(doc, i)
         out.append({"index": i, "text": info["text"][:80], "style": info["style"],
                     **formatting.paragraph_readback(got, spec)})
-    if "tab_stops" in spec:
-        warnings = warnings + [TABS_ON_MAC]
+    warnings = warnings + tab_warnings
     result = {"success": True, "paragraphs": out}
     if warnings:
         result["warnings"] = warnings
@@ -1078,7 +1137,34 @@ def _mac_style_name(ref):
     return name or None  # Normal's base style answers a style named ""
 
 
-def _describe_mac_style(s) -> dict:
+def _style_path(name_local: str, *more) -> str:
+    from ._vba import path_of
+
+    return path_of("Styles", ("Item", name_local), *more)
+
+
+def _bridged_style(doc, out: dict, kind: str) -> None:
+    """What Windows says of a style and Word for Mac's scripting cannot read
+    (quick_style, priority, locked; the font's and paragraph's members it
+    lacks; tab stops), through the VBA bridge when it can be used."""
+    from . import _vba
+
+    if _vba.usable():
+        return
+    name = out["name"]
+    values = _vba.batch(_full(doc), [("get", _style_path(name), m)
+                                     for m in ("QuickStyle", "Priority", "Locked")])
+    out.update(zip(("quick_style", "priority", "locked"), values))
+    if "font" in out:
+        out["font"].update(P.com_read(_vba.Remote(_full(doc), _style_path(name, "Font")),
+                                      [p for p in P.FONT_PROPS if p.mac is None]))
+    if kind == "paragraph":
+        fmt = _vba.Remote(_full(doc), _style_path(name, "ParagraphFormat"))
+        out["paragraph"].update(P.com_read(fmt, [p for p in P.PARAGRAPH_PROPS if p.mac is None]))
+        out["paragraph"]["tab_stops"] = _vba.read_tab_stops(fmt)
+
+
+def _describe_mac_style(s, doc=None) -> dict:
     raw = _name(s.style_type.get())
     kind = STYLE_TYPES.get(raw, raw)
     out = {"name": s.name_local.get(), "type": kind, "builtin": bool(s.built_in.get()),
@@ -1106,13 +1192,15 @@ def _describe_mac_style(s) -> dict:
             out["paragraph"]["borders"] = borders
         if shading:
             out["paragraph"]["shading"] = shading
+    if doc is not None:
+        _bridged_style(doc, out, kind)
     return out
 
 
 @mac_impl(formatting._get_style_impl)
 def get_style(style):
     doc = backend.word.document()
-    return {"success": True, "style": _describe_mac_style(_style_object(doc, style))}
+    return {"success": True, "style": _describe_mac_style(_style_object(doc, style), doc)}
 
 
 @mac_impl(formatting._set_style_impl)
@@ -1130,12 +1218,24 @@ def set_style(style, create, base_style, next_style, font, paragraph, quick_styl
             raise ValueError(f"A style called '{style}' already exists. Leave out "
                              "`create` to change it.")
         # Measured on Word 16.114: `make new Word style`, with or without a
-        # type, answers -1708 and makes nothing, whatever the name.
-        raise ValueError(
-            "Creating a style does not work through Word for Mac's scripting (Word "
-            "answers -1708 and makes nothing). Create it in Word's Styles pane, or on "
-            "Windows, then change it here; or base the look on a built-in style such "
-            "as \"Body Text\" and change that.")
+        # type, answers -1708 and makes nothing, whatever the name. VBA's
+        # Styles.Add works.
+        from . import _vba
+        from ..backend.bridge import encode
+
+        why = _vba.usable()
+        if why:
+            raise ValueError(
+                "Creating a style does not work through Word for Mac's scripting (Word "
+                "answers -1708 and makes nothing), and ms-word-mcp's VBA bridge, which "
+                f"creates one, cannot be used with this Word ({why}). Create it in Word's "
+                "Styles pane, or on Windows, then change it here; or base the look on a "
+                "built-in style such as \"Body Text\" and change that.")
+        base_name = _mac_style_name(_style_object(doc, base_style)) if base_style else ""
+        word = backend.word
+        made = word.vba.call(word.get_app(), "AddStyle", encode(_full(doc)), encode(style),
+                             str(formatting._NEW_STYLE_TYPES[create]), encode(base_name or ""))
+        s = _style_object(doc, _vba.decode(made[0]))
     else:
         s = _style_object(doc, style)
         s.name_local.get()  # raises if it does not exist
@@ -1144,7 +1244,8 @@ def set_style(style, create, base_style, next_style, font, paragraph, quick_styl
         raise ValueError(f"'{style}' is a {kind} style, which has no paragraph formatting.")
 
     refused = {}
-    if base_style is not None:
+    # A style just created has its base already (AddStyle), as on Windows.
+    if base_style is not None and not create:
         try:
             s.base_style.set(_style_value(doc, base_style))
         except Exception as exc:  # noqa: BLE001
@@ -1163,13 +1264,28 @@ def set_style(style, create, base_style, next_style, font, paragraph, quick_styl
                 getattr(s, prop).set(value)
             except Exception as exc:  # noqa: BLE001
                 refused[key] = str(exc).splitlines()[0]
-    for key, value in (("quick_style", quick_style), ("priority", priority)):
-        if value is not None:
-            refused[key] = "Word for Mac's scripting has no such property; it works on Windows."
+    asked = {key: value for key, value in (("quick_style", quick_style), ("priority", priority))
+             if value is not None}
+    if asked:
+        from . import _vba
+
+        why = _vba.usable()
+        for key, value in asked.items():
+            member = {"quick_style": "QuickStyle", "priority": "Priority"}[key]
+            if why:
+                refused[key] = _vba.NEEDS_BRIDGE.format(why=why)
+                continue
+            try:
+                setattr(_vba.Remote(_full(doc), _style_path(s.name_local.get())), member, value)
+            except Exception as exc:  # noqa: BLE001 - reported to the caller
+                refused[key] = str(exc).splitlines()[0]
     font_spec = P.with_latin_extended(P.given(font, P.FONT_NAMES))
     para_spec = P.given(paragraph, P.PARAGRAPH_NAMES)
+    name = s.name_local.get()
     font_refused = P.mac_apply(s.font_object, P.FONT_PROPS, font_spec) if font_spec else {}
-    para_refused = {}
+    if font_spec:
+        _bridged(doc, _style_path(name, "Font"), P.FONT_PROPS, font_spec, font_refused, {})
+    para_refused, tab_warnings = {}, []
     if para_spec:
         fmt = s.paragraph_format
         para_refused = P.mac_apply(fmt, P.PARAGRAPH_PROPS, para_spec)
@@ -1177,8 +1293,13 @@ def set_style(style, create, base_style, next_style, font, paragraph, quick_styl
                                  para_spec.get("line_spacing"))
         para_refused.update(P.mac_apply_borders(s, para_spec.get("borders")))
         P.mac_apply_shading(s, para_spec.get("shading"))
+        _bridged(doc, _style_path(name, "ParagraphFormat"), P.PARAGRAPH_PROPS, para_spec,
+                 para_refused, {})
+        if "tab_stops" in para_spec:
+            _, tab_warnings = _bridged_tabs(doc, _style_path(name, "ParagraphFormat"),
+                                            para_spec["tab_stops"])
 
-    described = _describe_mac_style(s)
+    described = _describe_mac_style(s, doc)
     warnings = [f"{key} was refused: {why}" for key, why in refused.items()]
     for key, wanted in (("base_style", base_style), ("next_style", next_style)):
         if wanted is not None and key not in refused:
@@ -1186,14 +1307,17 @@ def set_style(style, create, base_style, next_style, font, paragraph, quick_styl
             if described.get(key) != want:
                 warnings.append(f"{key} reads back as {described.get(key)!r}, not {want!r}.")
     for key, value in (("automatically_update", automatically_update),
-                       ("no_space_between_same_style", no_space_between_same_style)):
-        if value is not None and key not in refused and described.get(key) != value:
+                       ("no_space_between_same_style", no_space_between_same_style),
+                       ("quick_style", quick_style), ("priority", priority)):
+        read = key in described or key not in ("quick_style", "priority")
+        if value is not None and key not in refused and read and described.get(key) != value:
             warnings.append(f"{key} reads back as {described.get(key)!r}, not {value!r}.")
     warnings += P.mismatches(font_spec, described.get("font", {}), font_refused)
     warnings += P.mismatches(para_spec, described.get("paragraph", {}), para_refused)
     warnings += P.border_mismatches(para_spec, described.get("paragraph", {}))
-    if "tab_stops" in para_spec:
-        warnings.append(TABS_ON_MAC)
+    warnings += tab_warnings
+    if "tab_stops" in para_spec and not tab_warnings:
+        warnings += formatting._tab_mismatch(para_spec, described.get("paragraph", {}))
     out = {"success": True, "created": bool(create), "style": described}
     if warnings:
         out["warnings"] = warnings

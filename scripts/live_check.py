@@ -122,10 +122,12 @@ def run_steps(path: str) -> None:
          3, None, {"space_before_lines": 0.5, "first_line_indent_chars": 1,
                    "east_asian_line_breaking": True, "hanging_punctuation": True},
          undo="Paragraph format", check=lambda o: "warnings" not in o)
-    # Word for Mac cannot create a style through its scripting; there the
-    # check is that it says so, and the steps after it use Body Text.
-    style = "Body Text" if sys.platform == "darwin" else "MCP 本文"
-    if sys.platform == "darwin":
+    # Word for Mac cannot create a style through its scripting; the VBA
+    # bridge can. Without it the check is that it says so, and the steps after
+    # it use Body Text.
+    no_bridge = sys.platform == "darwin" and not _bridge_usable()
+    style = "Body Text" if no_bridge else "MCP 本文"
+    if no_bridge:
         step("creating a style is refused on the Mac", formatting._set_style_impl,
              "MCP 本文", "paragraph", None, None, None, None, None, None, None, None,
              check=lambda o: "Styles pane" in o.get("error", ""))
@@ -137,12 +139,12 @@ def run_steps(path: str) -> None:
          undo="Paragraph format",
          check=lambda o: (o["paragraphs"][0].get("direction") == "right_to_left"
                           and len(o["paragraphs"][0].get("tab_stops", [])) == 2)
-         if sys.platform != "darwin" else len(o.get("warnings", [])) == 2)
+         if not no_bridge else len(o.get("warnings", [])) == 2)
     step("back to left-to-right, no tab stops", formatting._set_paragraph_format_impl,
          5, None, {"direction": "left_to_right", "tab_stops": []}, undo="Paragraph format",
          check=lambda o: "error" not in o)
     step("define a paragraph style", formatting._set_style_impl, style,
-         None if sys.platform == "darwin" else "paragraph", "Normal", None, {"east_asian_font": "BIZ UDPゴシック", "size": 10.5,
+         None if no_bridge else "paragraph", "Normal", None, {"east_asian_font": "BIZ UDPゴシック", "size": 10.5,
                           "color": "#333333"},
          {"first_line_indent_chars": 1, "space_after_lines": 0.5,
           "line_spacing_rule": "exactly", "line_spacing": 18},
@@ -274,6 +276,7 @@ def run_steps(path: str) -> None:
     run_pdf_steps()
     run_bridge_steps()
     run_find_bridge_steps()
+    run_mac_gap_steps()
     run_revision_steps()
     run_link_steps()
     run_shape_steps()
@@ -1010,6 +1013,85 @@ def run_find_bridge_steps() -> None:
         call_document.reset(token)
 
 
+def run_mac_gap_steps() -> None:
+    """What Word for Mac's scripting lacks, through the VBA bridge there; on
+    Windows the same steps run over COM, so the answers can be compared."""
+    other = step("a document for the gaps", documents._create_document_impl, None, None)
+    if "error" in other:
+        return
+    token = call_document.set(other["full_name"])
+    try:
+        made = step("three paragraphs for the gaps", text._insert_paragraphs_impl,
+                    [{"text": "English and مرحبا بالعالم", "style": "Normal"},
+                     {"text": "Name\tValue", "style": "Normal"},
+                     {"text": "Plain.", "style": "Normal"}], None, None)
+        if "error" in made:
+            return
+        if backend.IS_MACOS and not _bridge_usable():
+            record("the bridge loads", False, {"vba_bridge": "off"})
+            return
+        step("complex-script size and an underline color", formatting._format_text_impl, 1, None,
+             None, {"size_complex_script": 16, "underline": "single", "underline_color": "#C00000"},
+             undo="Format text",
+             check=lambda o: "warnings" not in o
+             and o["read_back"][0].get("size_complex_script") == 16
+             and o["read_back"][0].get("underline_color") == "#C00000")
+        step("right to left", formatting._set_paragraph_format_impl, 1, None,
+             {"direction": "right_to_left"}, undo="Paragraph format",
+             check=lambda o: "warnings" not in o
+             and o["paragraphs"][0].get("direction") == "right_to_left")
+        step("tab stops", formatting._set_paragraph_format_impl, 2, None,
+             {"tab_stops": [{"position": 72, "alignment": "left", "leader": "none"},
+                            {"position": 200, "alignment": "right", "leader": "dots"}]},
+             undo="Paragraph format",
+             check=lambda o: "warnings" not in o
+             and [t["position"] for t in o["paragraphs"][0]["tab_stops"]] == [72, 200]
+             and o["paragraphs"][0]["tab_stops"][1]["leader"] == "dots")
+        step("tab stops cleared", formatting._set_paragraph_format_impl, 2, None,
+             {"tab_stops": []}, undo="Paragraph format",
+             check=lambda o: o["paragraphs"][0]["tab_stops"] == [])
+        name = f"MCP Gap {time.strftime('%H%M%S')}"
+        step("a new paragraph style", formatting._set_style_impl, name, "paragraph", "Normal", None,
+             {"size": 11, "size_complex_script": 13, "color": "#1F4E79"},
+             {"space_after": 6, "tab_stops": [{"position": 36, "alignment": "center",
+                                               "leader": "none"}]},
+             True, 5, None, None, undo="Define style",
+             check=lambda o: o.get("created") is True and "warnings" not in o)
+        step("it reads back with what the Mac could not read before", formatting._get_style_impl,
+             name, check=lambda o: (o["style"]["quick_style"], o["style"]["priority"]) == (True, 5)
+             and o["style"]["font"]["size_complex_script"] == 13
+             and [t["position"] for t in o["style"]["paragraph"]["tab_stops"]] == [36]
+             and o["style"]["base_style"] is not None)
+        step("a new character style", formatting._set_style_impl, name + " C", "character", None,
+             None, {"bold": True}, None, None, None, None, None, undo="Define style",
+             check=lambda o: o.get("created") is True and "warnings" not in o)
+        step("the paragraph style applied", formatting._apply_style_impl, 3, None, name, False,
+             undo="Apply style", check=lambda o: "warnings" not in o)
+        table = step("a table of two columns", tables._insert_table_impl,
+                     [["a", "b"], ["c", "d"]], 3, None, None, None, None, None, None, None, None,
+                     undo="Insert table")
+        if "error" not in table:
+            n = table["table"]
+            step("a column in the middle", tables._insert_columns_impl, n, 1, None, [["x", "y"]],
+                 undo="Insert table columns",
+                 check=lambda o: o["columns"] == 3 and o["cells"] == [["a", "x", "b"], ["c", "y", "d"]])
+            step("two at the right", tables._insert_columns_impl, n, None, 2, None,
+                 undo="Insert table columns",
+                 check=lambda o: o["columns"] == 5 and o["inserted_columns"] == [4, 5])
+        step("a box", shapes._insert_shape_impl, "rectangle", 1, 120.0, 60.0,
+             {"name": "Gap box", "text": "Inside", "alt_text": "A blue box",
+              "vertical_anchor": "middle"}, undo="Insert shape",
+             check=lambda o: "warnings" not in o and o.get("alt_text") == "A blue box")
+        step("its alt text changed", shapes._set_shape_impl, "Gap box",
+             {"alt_text": "日本語の説明 𠮷"}, undo="Change shape",
+             check=lambda o: "warnings" not in o and o.get("alt_text") == "日本語の説明 𠮷")
+        step("listed with its alt text", shapes._list_shapes_impl, 1, 50,
+             check=lambda o: [s.get("alt_text") for s in o["shapes"]] == ["日本語の説明 𠮷"])
+        step("close the document of the gaps", documents._close_document_impl, False)
+    finally:
+        call_document.reset(token)
+
+
 def run_link_steps() -> None:
     """Hyperlinks to addresses and bookmarks, and the user's own bookmarks."""
     other = step("a document for links", documents._create_document_impl, None, None)
@@ -1183,7 +1265,7 @@ def run_shape_steps() -> None:
              check=lambda o: o["count"] == 5 and o["shapes"][0]["name"] == "First"
              and o["shapes"][0]["text"] == "中身\nSecond"
              and [s["index"] for s in o["shapes"]] == sorted(s["index"] for s in o["shapes"]))
-        if not backend.IS_MACOS:
+        if not backend.IS_MACOS or _bridge_usable():
             step("alternative text", change, "Line", {"alt_text": "矢印"}, undo="Change shape",
                  check=lambda o: o["alt_text"] == "矢印")
             step("vertical anchor", change, "First", {"vertical_anchor": "top"},
@@ -1577,7 +1659,7 @@ def run_table_steps() -> None:
          check=lambda o: o["header_rows"] == 1 and o["cells"][4][0] == "Fig")
     step("delete a row", tables._delete_rows_impl, n, 4, None, undo="Delete table rows",
          check=lambda o: o["rows"] == 4)
-    if backend.IS_MACOS:
+    if backend.IS_MACOS and not _bridge_usable():
         step("adding a column is refused on the Mac", tables._insert_columns_impl, n, 1,
              None, [["Unit", "kg", "kg", "kg"]], undo="Insert table columns",
              check=lambda o: "cannot add a column" in o.get("error", ""))

@@ -249,7 +249,7 @@ Reading a paragraph over COM or Apple Events asks Word once for each property, a
 
 `word_find_replace` goes through it too: 3,000 matches are replaced in one call, in 2.4 s on Windows and 7.4 s on macOS, where one call used to get through 740 and 1,249 of them. On macOS it also brings wildcard searches, and the whole replacement becomes one Undo step.
 
-The answers are the same, and on the Mac `detail` now gives what Windows gives (a mixed paragraph's bold reads as mixed, theme and automatic colors as none). On the Mac the bridge also gives comments their replies and done state, which Word for Mac's scripting lacks.
+The answers are the same, and on the Mac `detail` now gives what Windows gives (a mixed paragraph's bold reads as mixed, theme and automatic colors as none). On the Mac the bridge also reaches what Word for Mac's scripting lacks: comments' replies and done state, adding table columns, creating a style, paragraph direction and tab stops, a complex-script size and an underline color, and a shape's alt text and vertical anchor.
 
 The first call that needs the template makes it a global template of the Word the server talks to, and the server takes it out again when it stops, so your Word is left as it was. On Windows it is added from the package with `AddIns.Add`. Word for Mac's scripting cannot add one, so the template is copied to Word's own folder, opened for a moment (which makes a new document from it), and that document's macro adds the template and is closed. If the bridge cannot be used, for instance because macros are turned off by policy, the tools read as before and `word_get_app_info` says why in `vba_bridge`.
 
@@ -262,7 +262,7 @@ An AI using these tools can read and change any document open in Word, open any 
 What the server does about it:
 
 - Macros are disabled while it opens a document or creates one from a template. Word would otherwise run them. The document stays open with macros off.
-- The only macros it runs are its own, from the bridge template in the package, and they only read paragraphs, find and replace text, and work with comments. `WORD_VBA_BRIDGE=off` leaves them out.
+- The only macros it runs are its own, from the bridge template in the package, and they only do what the tools ask: read paragraphs, find and replace, work with comments, and on the Mac set the formatting its scripting cannot reach. `WORD_VBA_BRIDGE=off` leaves them out.
 - Fields that reach outside the document are refused and left alone unless you set `WORD_ALLOW_ACTIVE_FIELDS`.
 - Network paths are refused unless you set `WORD_ALLOW_NETWORK_PATHS`.
 - A new link goes to http, https, mailto or tel, or to a path relative to the document. A link the document already has is left as it is.
@@ -275,17 +275,19 @@ To report a vulnerability, see [SECURITY.md](https://github.com/ykuwai/ms-word-m
 
 The same tools, the same arguments, the same answers. What differs is what Word for Mac's scripting can reach, and where it cannot reach something the tool says so.
 
-Not available on macOS:
+Through the [VBA bridge](#the-vba-bridge) only, since Word for Mac's scripting cannot reach them (without it the tools say so):
 
-- `word_insert_table_columns`: Word for Mac's scripting cannot add columns
+- `word_insert_table_columns`, and creating a style
 - Paragraph direction (right to left) and tab stops
 - The size of complex-script text and the color of an underline
+- A style's `quick_style` and `priority`
 - Alt text on a floating shape, and where text sits from top to bottom in one
+- Replies to comments and their done state, and wildcard searches
 
 Smaller differences:
 
-- Each change is its own Undo step, because Word for Mac's scripting cannot group them, and a style can be changed but not created. Tools say so in their results. A replacement through the [VBA bridge](#the-vba-bridge) is one step, and only the bridge gives wildcard searches.
-- Replies to comments and their done state go through the [VBA bridge](#the-vba-bridge). Loading it the first time opens a document made from its template for about a second, and leaves the template and a lock file in Word's own folder.
+- Each change is its own Undo step, because Word for Mac's scripting cannot group them. Tools say so in their results. A replacement through the [VBA bridge](#the-vba-bridge) is one step.
+- Loading the [VBA bridge](#the-vba-bridge) the first time opens a document made from its template for about a second, and leaves the template and a lock file in Word's own folder.
 - Word for Mac is sandboxed: it writes without asking only inside `~/Library/Containers/com.microsoft.Word/Data/Documents`, and saving elsewhere may make Word ask for access.
 - Word asks you about each file outside its own folder, so `word_insert_picture` puts a copy in Word's folder for a moment and reads it there. The first time, macOS may ask once whether the app the server runs in may use Word's data.
 - `word_get_page_image` has Word save a PDF next to the document for a moment. For a document never saved, the PDF goes in Word's own folder, and macOS may ask the same question.
