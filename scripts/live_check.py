@@ -265,6 +265,7 @@ def run_steps(path: str) -> None:
          check=lambda o: o["headings"] == full["headings"] and len(o["headings"]) >= 2)
     run_table_steps()
     run_table_more_steps()
+    run_style_numbering_steps()
     run_picture_and_page_steps(Path(path).parent)
     run_review_steps()
     run_heading_number_steps()
@@ -1683,6 +1684,59 @@ def run_table_more_steps() -> None:
             step("close the document in front", documents._close_document_impl, False)
         finally:
             call_document.reset(token)
+
+
+def run_style_numbering_steps() -> None:
+    """A style's numbering: read it, join another style's at a level, take it off."""
+    other = step("a document for numbered styles", documents._create_document_impl, None, None)
+    if "error" in other:
+        return
+    token = call_document.set(other["full_name"])
+    try:
+        made = step("headings at three levels", text._insert_paragraphs_impl,
+                    [{"text": "Intro", "style": "Heading 1"}, {"text": "Part", "style": "Heading 2"},
+                     {"text": "Deep", "style": "Heading 3"}, {"text": "Body.", "style": "Normal"},
+                     {"text": "Next", "style": "Heading 1"}], None, None)
+        if "error" in made:
+            return
+        step("Heading 1 and 2 numbered", lists._apply_list_impl, 1, 1,
+             [{"level": 1, "number_style": "arabic", "number_format": "%1.",
+               "linked_style": "Heading 1"},
+              {"level": 2, "number_style": "arabic", "number_format": "%1.%2",
+               "linked_style": "Heading 2"},
+              {"level": 3, "number_style": "arabic", "number_format": "%1.%2.%3"}], None, False,
+             undo="Apply list")
+        if backend.IS_MACOS and not _bridge_usable():
+            record("the bridge loads", False, {"vba_bridge": "off"})
+            return
+        step("Heading 1's numbering reads back", formatting._get_style_impl, "Heading 1",
+             check=lambda o: o["style"]["numbering"]["level"] == 1
+             and o["style"]["numbering"]["number_format"] == "%1."
+             and len(o["style"]["numbering"]["linked_styles"]) == 2)
+        step("Heading 3 has none yet", formatting._get_style_impl, "Heading 3",
+             check=lambda o: o["style"].get("numbering") is None)
+        step("Heading 3 joins Heading 1's numbering at level 3", formatting._set_style_impl,
+             "Heading 3", None, None, None, None, None, None, None, None, None,
+             {"like": "Heading 1", "level": 3}, undo="Define style",
+             check=lambda o: "warnings" not in o and o["style"]["numbering"]["level"] == 3
+             and o["style"]["numbering"]["number_format"] == "%1.%2.%3"
+             and len(o["style"]["numbering"]["linked_styles"]) == 3)
+        step("its paragraph is numbered 1.1.1", lists._get_list_impl, 3,
+             check=lambda o: o["paragraph"]["list_string"] == "1.1.1")
+        step("its numbering taken off", formatting._set_style_impl, "Heading 3", None, None, None,
+             None, None, None, None, None, None, "none", undo="Define style",
+             check=lambda o: "warnings" not in o and o["style"].get("numbering") is None)
+        step("and the paragraph with it", lists._get_list_impl, 3,
+             check=lambda o: o["paragraph"]["list"] == "none")
+        step("the headings around it keep theirs", lists._get_list_impl, 5,
+             check=lambda o: o["paragraph"]["list_string"] == "2.")
+        step("joining a style that has no numbering is refused", formatting._set_style_impl,
+             "Heading 3", None, None, None, None, None, None, None, None, None,
+             {"like": "Body Text", "level": 2},
+             check=lambda o: "has no numbering to join" in o.get("error", ""))
+        step("close the document for numbered styles", documents._close_document_impl, False)
+    finally:
+        call_document.reset(token)
 
 
 def run_table_steps() -> None:

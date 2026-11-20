@@ -124,8 +124,8 @@ First, fixes to what is there, for long documents (PROBES.md, Reading):
 
 Then, ordered roughly by what the owner stressed.
 
-1. **Styles, the rest.** List linkage, the language of a style. (Tab stops
-   and creating a style on the Mac now go through the VBA bridge.)
+1. **Styles, the rest.** The language of a style. (List linkage is done;
+   tab stops and creating a style on the Mac go through the VBA bridge.)
 2. **Lists, the rest.** Picture bullets.
 3. **Equations, the rest.** Inline equations inside a paragraph,
    chapter-style numbers (2.1) with STYLEREF, cross-references to equations,

@@ -1143,6 +1143,26 @@ def _style_path(name_local: str, *more) -> str:
     return path_of("Styles", ("Item", name_local), *more)
 
 
+def _mac_style_list(doc, name: str) -> dict | None:
+    """A style's numbering, through the VBA bridge (formatting.style_list): Apple
+    Events answer a missing value for every level's linked style (measured)."""
+    from . import _vba
+
+    key = _full(doc)
+    template, level = _vba.batch(key, [("get", _style_path(name), "ListTemplate"),
+                                       ("get", _style_path(name), "ListLevelNumber")])
+    if template is None:
+        return None
+    levels = template.at("ListLevels")
+    count = levels.Count
+    members = ("NumberStyle", "NumberFormat", "LinkedStyle")
+    values = _vba.batch(key, [("get", levels.at(("Item", i))._path, m)
+                              for i in range(1, count + 1) for m in members])
+    return formatting.style_list(level, [
+        (i, values[3 * (i - 1)], values[3 * (i - 1) + 1], values[3 * (i - 1) + 2] or None)
+        for i in range(1, count + 1)])
+
+
 def _bridged_style(doc, out: dict, kind: str) -> None:
     """What Windows says of a style and Word for Mac's scripting cannot read
     (quick_style, priority, locked; the font's and paragraph's members it
@@ -1162,6 +1182,7 @@ def _bridged_style(doc, out: dict, kind: str) -> None:
         fmt = _vba.Remote(_full(doc), _style_path(name, "ParagraphFormat"))
         out["paragraph"].update(P.com_read(fmt, [p for p in P.PARAGRAPH_PROPS if p.mac is None]))
         out["paragraph"]["tab_stops"] = _vba.read_tab_stops(fmt)
+        out["numbering"] = _mac_style_list(doc, name)
 
 
 def _describe_mac_style(s, doc=None) -> dict:
@@ -1205,7 +1226,7 @@ def get_style(style):
 
 @mac_impl(formatting._set_style_impl)
 def set_style(style, create, base_style, next_style, font, paragraph, quick_style,
-              priority, automatically_update, no_space_between_same_style):
+              priority, automatically_update, no_space_between_same_style, numbering=None):
     k = _k()
     doc = backend.word.document()
     exists = True
@@ -1242,8 +1263,30 @@ def set_style(style, create, base_style, next_style, font, paragraph, quick_styl
     kind = STYLE_TYPES.get(_name(s.style_type.get()), "paragraph")
     if paragraph and kind != "paragraph":
         raise ValueError(f"'{style}' is a {kind} style, which has no paragraph formatting.")
+    if numbering is not None and kind != "paragraph":
+        raise ValueError(f"'{style}' is a {kind} style, which takes no numbering.")
 
     refused = {}
+    if numbering is not None:
+        # `link to list template` is refused (-1708, measured); VBA's works.
+        from . import _vba
+        from ..backend.bridge import encode
+
+        why = _vba.usable()
+        if why:
+            refused["numbering"] = (
+                "Word for Mac's scripting cannot link a style to a list (-1708), and "
+                f"ms-word-mcp's VBA bridge, which can, cannot be used with this Word ({why}).")
+        else:
+            like = "" if numbering == "none" else _mac_style_name(
+                _style_object(doc, numbering["like"]))
+            if like and _mac_style_list(doc, like) is None:
+                raise ValueError(f"'{numbering['like']}' has no numbering to join. Number it "
+                                 "first: word_apply_list with linked_style on its level.")
+            word = backend.word
+            word.vba.call(word.get_app(), "StyleList", encode(_full(doc)),
+                          encode(s.name_local.get()), encode(like),
+                          "0" if numbering == "none" else str(numbering["level"]))
     # A style just created has its base already (AddStyle), as on Windows.
     if base_style is not None and not create:
         try:
@@ -1316,6 +1359,8 @@ def set_style(style, create, base_style, next_style, font, paragraph, quick_styl
     warnings += P.mismatches(para_spec, described.get("paragraph", {}), para_refused)
     warnings += P.border_mismatches(para_spec, described.get("paragraph", {}))
     warnings += tab_warnings
+    if "numbering" not in refused and "numbering" in described:
+        warnings += formatting.numbering_warnings(numbering, described["numbering"], style)
     if "tab_stops" in para_spec and not tab_warnings:
         warnings += formatting._tab_mismatch(para_spec, described.get("paragraph", {}))
     out = {"success": True, "created": bool(create), "style": described}

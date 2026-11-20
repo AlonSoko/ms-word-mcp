@@ -277,7 +277,7 @@ COM や Apple Events で段落を読むと、プロパティごとに 1 回 Word
 
 Word for Mac のスクリプトでは届かないため、[VBA ブリッジ](#vba-ブリッジ)を通してだけ使えるもの（ブリッジがないときはツールがそう答えます）:
 
-- `word_insert_table_columns` と、スタイルの新規作成
+- `word_insert_table_columns`、スタイルの新規作成、スタイルと番号付けのリンク
 - 段落の方向（右から左）とタブ位置
 - 複雑な文字のサイズと、下線の色
 - スタイルの `quick_style` と `priority`

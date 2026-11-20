@@ -277,7 +277,7 @@ The same tools, the same arguments, the same answers. What differs is what Word 
 
 Through the [VBA bridge](#the-vba-bridge) only, since Word for Mac's scripting cannot reach them (without it the tools say so):
 
-- `word_insert_table_columns`, and creating a style
+- `word_insert_table_columns`, creating a style, and linking a style to numbering
 - Paragraph direction (right to left) and tab stops
 - The size of complex-script text and the color of an underline
 - A style's `quick_style` and `priority`

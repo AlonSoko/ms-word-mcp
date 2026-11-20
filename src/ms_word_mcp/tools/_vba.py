@@ -44,7 +44,7 @@ def path_of(*steps) -> str:
     return "/".join(out)
 
 
-def _value(answer: str, document: str, path: str, name: str):
+def _value(answer: str, document: str, path: str, name: str, args=()):
     kind, rest = answer[:1], answer[1:]
     if kind == "n":
         number = float(rest)
@@ -54,7 +54,8 @@ def _value(answer: str, document: str, path: str, name: str):
     if kind == "b":
         return rest == "1"
     if kind == "o":
-        return Remote(document, f"{path}/{name}" if path else name)
+        step = path_of((name, *args)) if args else name
+        return Remote(document, f"{path}/{step}" if path else step)
     return None
 
 
@@ -69,7 +70,8 @@ def batch(document: str, operations: list[tuple]) -> list:
     lines = [f"{how}|{path}|{name}" + "".join("|" + code(a) for a in args)
              for how, path, name, *args in operations]
     answers = vba.call(word.get_app(), "Member", encode(document), *lines)
-    return [_value(a, document, path, name) for a, (_, path, name, *_) in zip(answers, operations)]
+    return [_value(a, document, path, name, args if how == "call" else ())
+            for a, (how, path, name, *args) in zip(answers, operations)]
 
 
 class Remote:

@@ -405,3 +405,16 @@ that is not the active one.
 | A cell asked for at a row past the last | `Table.Cell(9, 1)` of a 5-row table answers a cell of row 5, which was split | The same, through `get cell from table`. The row and the cell's place in it are checked first, on both platforms |
 | A cell past the last of a shorter row (after a merge) | `Table.Cell` raises | `get cell from table` is refused (-1708); formatting a block skips that position, as on Windows |
 
+## A style's numbering (Word 16, both platforms)
+
+Measured 2026-11-20; `run_style_numbering_steps` in `scripts/live_check.py`
+repeats it. Heading 1 and 2 numbered with `word_apply_list` (level 1 linked to
+Heading 1, level 2 to Heading 2), then Heading 3 linked at level 3 and taken off.
+
+| What | Windows | Mac |
+|---|---|---|
+| A style's list | `Style.ListTemplate` (Nothing when it has none) and `Style.ListLevelNumber` | `list template` (missing value when none) and `list level number` |
+| The style each level is linked to | `ListLevel.LinkedStyle` | Apple Events answer a missing value for every level, Heading 1's too; the bridge reads `LinkedStyle` |
+| Joining a list at a level | `Style.LinkToListTemplate(template, 3)`: Heading 3's paragraph reads 1.1.1, and the list's level 3 names Heading 3 | `link to list template` is refused (-1708); through the bridge, as on Windows |
+| Taking a style's numbering off | `LinkToListTemplate(None)`: the paragraph has no list, the headings around it keep theirs (the next Heading 1 reads 2.) | Through the bridge (`LinkToListTemplate Nothing`), the same |
+

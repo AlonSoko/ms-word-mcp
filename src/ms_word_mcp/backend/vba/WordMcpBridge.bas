@@ -18,7 +18,7 @@ Option Explicit
 
 ' Raise it, and VERSION in backend/bridge.py, with any change to this module:
 ' a server that finds another version loaded in Word replaces it.
-Public Const BRIDGE_VERSION As String = "3"
+Public Const BRIDGE_VERSION As String = "4"
 Private Const REQUEST_FILE As String = "ms-word-mcp-bridge.request"
 Private Const ANSWER_FILE As String = "ms-word-mcp-bridge.answer"
 Private Const TEMPLATE_FILE As String = "ms-word-mcp-bridge.dotm"
@@ -117,6 +117,7 @@ Private Function Dispatch(what As String, r As Variant) As String
         Case "FindReplace": Dispatch = FindReplace(r)
         Case "Member": Dispatch = Member(r)
         Case "AddStyle": Dispatch = AddStyle(r)
+        Case "StyleList": Dispatch = StyleList(r)
         Case Else: Err.Raise 5, , "The bridge has no request called " & what
     End Select
     Exit Function
@@ -416,6 +417,28 @@ Private Function AddStyle(r As Variant) As String
     Exit Function
 Failed:
     Err.Raise Err.Number, , Err.Description & " (AddStyle: " & stage & ")"
+End Function
+
+' request: document, style (local name), the style whose list it joins (its
+' local name; nothing to take the style's numbering off), the level. Word for
+' Mac's `link to list template` is refused (-1708, measured). answer: the
+' style's list level after it, 0 when it has no list.
+Private Function StyleList(r As Variant) As String
+    Dim d As Document, s As Style, lt As ListTemplate
+    Set d = FindDocument(Decode(CStr(r(0))))
+    Set s = d.Styles(Decode(CStr(r(1))))
+    If Len(r(2)) = 0 Then
+        s.LinkToListTemplate Nothing
+    Else
+        Set lt = d.Styles(Decode(CStr(r(2)))).ListTemplate
+        If lt Is Nothing Then Err.Raise 5, , Decode(CStr(r(2))) & " has no numbering to join."
+        s.LinkToListTemplate lt, CLng(r(3))
+    End If
+    If s.ListTemplate Is Nothing Then
+        StyleList = "ok" & vbLf & "0"
+    Else
+        StyleList = "ok" & vbLf & s.ListLevelNumber
+    End If
 End Function
 
 ' Where the document's tracked deletions are, in order of their starts.
