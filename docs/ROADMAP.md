@@ -108,9 +108,11 @@ First, fixes to what is there, for long documents (PROBES.md, Reading):
 - **word_get_outline** now reads Word's heading list and checks each
   heading (1,000 paragraphs: 2.5 s instead of 28 s on Windows, 3.4 s
   instead of 20 s on the Mac).
-- **word_find_replace** on Windows finds about 40 matches a second, match by
-  match, so thousands take several calls (docs/PROBES.md, Replacing many
-  matches).
+- **word_find_replace** now searches and replaces through the VBA bridge,
+  inside Word: 3,000 matches replaced in one call (2.4 s on Windows, 7.4 s on
+  the Mac), where a call replaced 740 on Windows and 1,249 on the Mac. On the
+  Mac this also gives wildcards and one undo step for the whole replacement.
+  Without the bridge it works match by match, as before.
 - **word_get_paragraphs** now reads through the VBA bridge, in one call to
   Word (200 paragraphs with `detail`: 0.30 s instead of 11.7 s on Windows,
   0.53 s instead of 27 s on the Mac). Without the bridge it asks Word three or

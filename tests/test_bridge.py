@@ -63,7 +63,7 @@ def test_the_setting(monkeypatch, value, on):
 class _WinApp:
     """Word over COM: AddIns.Add makes the macro there; Run answers through it."""
 
-    def __init__(self, macros_allowed=True, version="1"):
+    def __init__(self, macros_allowed=True, version=bridge.VERSION):
         self.loaded, self.runs, self.allowed, self.version = False, [], macros_allowed, version
         self.items = []
         app = self
@@ -124,7 +124,7 @@ def _preloaded(version):
 
 
 def test_a_bridge_left_loaded_is_used_and_taken_out_at_the_end():
-    app, vba = _preloaded("1"), bridge.Bridge("windows")
+    app, vba = _preloaded(bridge.VERSION), bridge.Bridge("windows")
     assert vba.call(app, "Echo", "a") == ["A"]
     assert len(app.items) == 1  # not added a second time
     vba.remove()
@@ -138,7 +138,7 @@ def test_another_version_left_loaded_is_replaced():
 
     def add(FileName, Install):
         added.append(FileName)
-        app.version = "1"
+        app.version = bridge.VERSION
         return real_add(FileName, Install)
     app.AddIns.Add = add
     vba = bridge.Bridge("windows")
@@ -209,11 +209,11 @@ class _MacApp:
         if macro_name == "WordMcpInstall":
             assert "Document2" in self.names, "run while the document made from the template is open"
             self.global_ = True
-            reply = "ok\n1"
+            reply = "ok\n" + bridge.VERSION
         elif not self.global_:
             raise RuntimeError("-1708")
         else:
-            reply = "ok\n1" if lines[0] == "Ping" else "ok\n" + ",".join(lines[1:-1])
+            reply = "ok\n" + bridge.VERSION if lines[0] == "Ping" else "ok\n" + ",".join(lines[1:-1])
         with open(answer, "w") as f:
             f.write(reply + "\n")
 
@@ -357,3 +357,91 @@ def test_app_info_says_whether_the_bridge_works():
     assert documents.vba_bridge_state(SimpleNamespace(vba=vba)) == "not loaded yet"
     vba.call(_WinApp(), "Echo")
     assert documents.vba_bridge_state(SimpleNamespace(vba=vba)) == "on"
+
+
+# -- find and replace -----------------------------------------------------------------
+
+def _answer(searched_all=True, done=0, missed=0, ran_out=False, matches=()):
+    return [("1" if searched_all else "0"), str(done), str(missed), "1" if ran_out else "0",
+            *[f"{s},{e},{p}" for s, e, p in matches]]
+
+
+def _find(monkeypatch, lines=None, error=None, **kw):
+    vba = _Vba(lines, error)
+    _word(monkeypatch, vba)
+    args = dict(find="cat", replace=None, match_case=False, whole_word=False, wildcards=False)
+    args.update(kw)
+    out = text.bridge_find_replace(lambda: "Report.docx", began=text.time.monotonic(), **args)
+    return out, vba.asked[0] if vba.asked else None
+
+
+def test_a_search_is_one_request_with_its_caret_doubled(monkeypatch):
+    out, asked = _find(monkeypatch, _answer(matches=[(0, 3, 1), (10, 13, 2), (20, 23, 2)]),
+                       find="x^2", match_case=True)
+    assert asked[:9] == ("FindReplace", bridge.encode("Report.docx"), bridge.encode("x^^2"),
+                         "", "0", "1", "0", "0", str(text.LISTED_MATCHES))
+    assert out == {"success": True, "matches": 3, "paragraphs": [1, 2]}
+
+
+def test_a_wildcard_pattern_goes_as_it_is_and_a_line_break_as_word_writes_it(monkeypatch):
+    _, asked = _find(monkeypatch, _answer(), find="c?t", replace="a\nb", wildcards=True)
+    assert (bridge.decode(asked[2]), bridge.decode(asked[3]), asked[4], asked[7]) == (
+        "c?t", "a\vb", "1", "1")
+
+
+def test_a_replacement_answers_as_over_com(monkeypatch):
+    out, _ = _find(monkeypatch, _answer(done=2, matches=[(0, 3, 1), (10, 13, 4)]), replace="dog")
+    assert out == {"success": True, "matches": 2, "paragraphs": [1, 4], "replaced": 2, "_first": 1}
+
+
+def test_a_replacement_read_back_differently_says_so(monkeypatch):
+    out, _ = _find(monkeypatch, _answer(done=2, missed=1, matches=[(0, 3, 1), (10, 13, 4)]),
+                   replace="dog")
+    assert out["replaced"] == 1 and "1 of 2 replacements read back differently" in out["warnings"][0]
+
+
+def test_out_of_time_it_says_to_call_again(monkeypatch):
+    out, _ = _find(monkeypatch, _answer(done=1, ran_out=True, matches=[(0, 3, 1), (10, 13, 4)]),
+                   replace="dog")
+    assert out["complete"] is False and "Call again" in out["warnings"][-1]
+
+
+def test_listed_numbers_stop_at_the_listed_matches(monkeypatch):
+    many = [(i * 10, i * 10 + 3, i + 1 if i < text.LISTED_MATCHES else 0) for i in range(150)]
+    out, _ = _find(monkeypatch, _answer(matches=many))
+    assert out["matches"] == 150 and len(out["paragraphs"]) == text.LISTED_MATCHES
+    assert out["paragraphs_cover"] == f"the first {text.LISTED_MATCHES} matches"
+
+
+def test_word_refusing_the_search_is_an_error_not_a_second_try(monkeypatch):
+    with pytest.raises(ValueError, match="stopped moving forward"):
+        _find(monkeypatch, error=bridge.BridgeError("Word's search stopped moving forward"))
+
+
+def test_without_the_bridge_it_is_done_as_before(monkeypatch):
+    assert _find(monkeypatch, error=bridge.Unavailable("off"))[0] is None
+
+
+def test_on_windows_find_replace_goes_through_the_bridge_and_follows_the_first(monkeypatch):
+    followed = []
+    doc = SimpleNamespace(FullName="C:\\d\\Report.docx", Name="Report.docx",
+                          Paragraphs=SimpleNamespace(Count=9, Item=lambda i: SimpleNamespace(Range=f"p{i}")))
+    vba = _Vba(_answer(done=1, matches=[(5, 8, 3)]))
+    monkeypatch.setattr(text.backend, "word", SimpleNamespace(vba=vba, get_app=lambda: None,
+                                                              document=lambda: doc))
+    monkeypatch.setattr(text, "follow", lambda d, rng: followed.append(rng))
+    out = text._find_replace_impl("cat", "dog", False, False, False)
+    assert out == {"success": True, "matches": 1, "paragraphs": [3], "replaced": 1}
+    assert followed == ["p3"]
+
+
+def test_on_the_mac_wildcards_work_through_the_bridge_and_are_refused_without_it(monkeypatch):
+    doc = SimpleNamespace()
+    monkeypatch.setattr(mac, "_full", lambda d: "/d/Report.docx")
+    vba = _Vba(_answer(matches=[(0, 3, 1)]))
+    monkeypatch.setattr(text.backend, "word", SimpleNamespace(vba=vba, get_app=lambda: None,
+                                                              document=lambda: doc))
+    assert mac.find_replace("c?t", None, False, False, True)["matches"] == 1
+    vba.error = bridge.Unavailable("macros are off")
+    with pytest.raises(ValueError, match="Wildcards on macOS need ms-word-mcp's VBA bridge"):
+        mac.find_replace("c?t", None, False, False, True)

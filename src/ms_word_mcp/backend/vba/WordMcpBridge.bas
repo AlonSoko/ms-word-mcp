@@ -18,7 +18,7 @@ Option Explicit
 
 ' Raise it, and VERSION in backend/bridge.py, with any change to this module:
 ' a server that finds another version loaded in Word replaces it.
-Public Const BRIDGE_VERSION As String = "1"
+Public Const BRIDGE_VERSION As String = "2"
 Private Const REQUEST_FILE As String = "ms-word-mcp-bridge.request"
 Private Const ANSWER_FILE As String = "ms-word-mcp-bridge.answer"
 Private Const TEMPLATE_FILE As String = "ms-word-mcp-bridge.dotm"
@@ -114,6 +114,7 @@ Private Function Dispatch(what As String, r As Variant) As String
         Case "SetDone": Dispatch = SetDone(r)
         Case "CommentState": Dispatch = CommentState(r)
         Case "DeleteComments": Dispatch = DeleteComments(r)
+        Case "FindReplace": Dispatch = FindReplace(r)
         Case Else: Err.Raise 5, , "The bridge has no request called " & what
     End Select
     Exit Function
@@ -228,6 +229,141 @@ End Function
 Private Function AncestorOf(c As Comment) As Comment
     On Error Resume Next
     Set AncestorOf = c.Ancestor
+End Function
+
+' Where the document's tracked deletions are, in order of their starts.
+Private Sub Deletions(d As Document, starts() As Long, ends() As Long, n As Long)
+    Dim rv As Revision, i As Long, j As Long, s As Long, e As Long
+    n = 0
+    ReDim starts(0)
+    ReDim ends(0)
+    If d.Revisions.Count = 0 Then Exit Sub
+    ReDim starts(d.Revisions.Count - 1)
+    ReDim ends(d.Revisions.Count - 1)
+    For Each rv In d.Revisions
+        If rv.Type = 2 Or rv.Type = 14 Then ' wdRevisionDelete, wdRevisionMovedFrom
+            starts(n) = rv.Range.Start
+            ends(n) = rv.Range.End
+            n = n + 1
+        End If
+    Next rv
+    For i = 1 To n - 1 ' by their starts
+        s = starts(i)
+        e = ends(i)
+        j = i - 1
+        Do While j >= 0
+            If starts(j) <= s Then Exit Do
+            starts(j + 1) = starts(j)
+            ends(j + 1) = ends(j)
+            j = j - 1
+        Loop
+        starts(j + 1) = s
+        ends(j + 1) = e
+    Next i
+End Sub
+
+' Whether [s, e) lies within the deletions taken together: two side by side
+' cover what they cover between them (tools/_word.py, inside_spans).
+Private Function Deleted(s As Long, e As Long, starts() As Long, ends() As Long, n As Long) As Boolean
+    Dim covered As Long, i As Long
+    covered = s
+    For i = 0 To n - 1
+        If ends(i) > covered Then
+            If starts(i) > covered Then Exit Function
+            covered = ends(i)
+            If covered >= e Then
+                Deleted = True
+                Exit Function
+            End If
+        End If
+    Next i
+End Function
+
+' word_find_replace, as tools/text.py does it over COM, inside Word. request:
+' document, what to find (a caret already doubled outside wildcards), the
+' new text, replace (1 or 0), match case, whole word, wildcards, how many
+' matches get a paragraph number, seconds to search, seconds in all.
+' Matches in tracked deletions are left out. They are replaced from the last
+' back, so the ones before keep their places, and each is read back. Inside
+' one undo record unless one is open already (the server's, on Windows).
+' answer: searched all (1 or 0), replaced, read back differently, out of
+' time (1 or 0), then a line a match: start,end,paragraph (0 past the listed)
+Private Function FindReplace(r As Variant) As String
+    Dim d As Document, rg As Range, began As Single, newText As String
+    Dim listed As Long, searchLimit As Single, workLimit As Single
+    Dim starts() As Long, ends() As Long, paras() As Long, n As Long, reached As Long
+    Dim delStarts() As Long, delEnds() As Long, nDel As Long, i As Long
+    Dim searchedAll As Boolean, done As Long, missed As Long, ranOut As Boolean
+    Dim recording As Boolean, lines() As String
+    began = Timer
+    Set d = FindDocument(Decode(CStr(r(0))))
+    newText = Decode(CStr(r(2)))
+    listed = CLng(r(7))
+    searchLimit = Val(r(8))
+    workLimit = Val(r(9))
+    Deletions d, delStarts, delEnds, nDel
+    ReDim starts(255)
+    ReDim ends(255)
+    ReDim paras(255)
+    searchedAll = True
+    reached = -1
+    Set rg = d.Content
+    rg.Find.ClearFormatting
+    Do While rg.Find.Execute(FindText:=Decode(CStr(r(1))), MatchCase:=(r(4) = "1"), _
+            MatchWholeWord:=(r(5) = "1"), MatchWildcards:=(r(6) = "1"), Forward:=True, _
+            Wrap:=0, Format:=False)
+        If rg.End <= reached Then
+            Err.Raise 5, , "Word's search stopped moving forward at position " & rg.End _
+                & ", after " & n & " matches. Nothing was changed. Try a narrower search."
+        End If
+        reached = rg.End
+        If Not Deleted(rg.Start, rg.End, delStarts, delEnds, nDel) Then
+            If n > UBound(starts) Then
+                ReDim Preserve starts(2 * n)
+                ReDim Preserve ends(2 * n)
+                ReDim Preserve paras(2 * n)
+            End If
+            starts(n) = rg.Start
+            ends(n) = rg.End
+            If n < listed Then paras(n) = d.Range(0, rg.Start + 1).Paragraphs.Count
+            n = n + 1
+        End If
+        If Seconds(began) > searchLimit Then
+            searchedAll = False
+            Exit Do
+        End If
+        rg.Collapse 0 ' wdCollapseEnd
+    Loop
+    If r(3) = "1" And n > 0 Then
+        recording = Application.UndoRecord.IsRecordingCustomRecord
+        If Not recording Then Application.UndoRecord.StartCustomRecord "Replace"
+        On Error GoTo Undone
+        For i = n - 1 To 0 Step -1
+            If Seconds(began) > workLimit Then
+                ranOut = True
+                Exit For
+            End If
+            d.Range(starts(i), ends(i)).Text = newText
+            done = done + 1
+            If d.Range(starts(i), starts(i) + Len(newText)).Text <> newText Then missed = missed + 1
+        Next i
+        On Error GoTo 0
+        If Not recording Then Application.UndoRecord.EndCustomRecord
+    End If
+    ReDim lines(n)
+    lines(0) = "ok" & vbLf & IIf(searchedAll, "1", "0") & vbLf & done & vbLf & missed & vbLf _
+        & IIf(ranOut, "1", "0")
+    For i = 0 To n - 1
+        lines(i + 1) = starts(i) & "," & ends(i) & "," & paras(i)
+    Next i
+    FindReplace = Join(lines, vbLf)
+    Exit Function
+Undone:
+    Dim number As Long, description As String
+    number = Err.Number
+    description = Err.Description
+    If Not recording Then Application.UndoRecord.EndCustomRecord
+    Err.Raise number, , description & " (after " & done & " of " & n & " matches were replaced)"
 End Function
 
 ' request: document, comment number, text. A reply to a reply goes to the

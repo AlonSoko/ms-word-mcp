@@ -676,11 +676,19 @@ def _index_at(doc, position: int) -> int:
 
 @mac_impl(text_tools._find_replace_impl)
 def find_replace(find, replace, match_case, whole_word, wildcards):
-    if wildcards:
-        raise ValueError("Wildcards are not supported on macOS yet. Search for plain "
-                         "text, or use Windows for a wildcard search.")
     doc = backend.word.document()
     began = time.monotonic()
+    # Through the VBA bridge when it is there: Word's own search, wildcards
+    # too, and one undo step. Without it, the text is searched in Python.
+    out = text_tools.bridge_find_replace(lambda: _full(doc), find, replace, match_case,
+                                         whole_word, wildcards, began)
+    if out is not None:
+        out.pop("_first", None)
+        return out
+    if wildcards:
+        raise ValueError("Wildcards on macOS need ms-word-mcp's VBA bridge, which cannot be "
+                         "used with this Word (word_get_app_info says why). Search for "
+                         "plain text instead.")
     found, searched_all = _matches_until(doc, find, match_case, whole_word,
                                          began + text_tools.SEARCH_SECONDS)
     until = began + text_tools.WORK_SECONDS

@@ -458,7 +458,9 @@ class FindReplaceInput(Input):
         "Replacement. Leave out to only count and locate the matches."))
     match_case: bool = False
     whole_word: bool = False
-    wildcards: bool = Field(False, description="Treat `find` as a Word wildcard pattern.")
+    wildcards: bool = Field(False, description=(
+        "Treat `find` as a Word wildcard pattern. On the Mac this needs ms-word-mcp's VBA "
+        "bridge (word_get_app_info, vba_bridge)."))
 
 
 #: How long one word_find_replace searches, and how long it works in all. A
@@ -501,6 +503,56 @@ def replace_outcome(result: dict, listed: int, searched_all: bool, replaced: int
     result.setdefault("warnings", []).append(note)
 
 
+def bridge_find_replace(document, find: str, replace: str | None, match_case: bool,
+                        whole_word: bool, wildcards: bool, began: float) -> dict | None:
+    """word_find_replace done by the VBA bridge inside Word, in one call; None
+    when the bridge cannot be used, and it is done as before.
+
+    The same search and replacement as _find_all and _find_replace_impl
+    (backend/vba/WordMcpBridge.bas, FindReplace): Find.Execute match by match,
+    matches in tracked deletions left out, the first LISTED_MATCHES numbered,
+    replaced from the last back and each read back, within SEARCH_SECONDS and
+    WORK_SECONDS. Over COM each match cost several calls into Word (about 40 a
+    second); inside Word they cost next to nothing. The answer also carries
+    `_first`, the paragraph of the first match, for the caller to follow."""
+    from ..backend.bridge import BridgeError, Unavailable, encode
+
+    word = backend.word
+    vba = getattr(word, "vba", None)
+    if vba is None:
+        return None
+    spent = time.monotonic() - began
+    pattern = find if wildcards else find.replace("^", "^^")
+    text = "" if replace is None else replace.replace("\n", "\v")
+    try:
+        lines = vba.call(
+            word.get_app(), "FindReplace", encode(document()), encode(pattern), encode(text),
+            "0" if replace is None else "1", "1" if match_case else "0",
+            "1" if whole_word else "0", "1" if wildcards else "0", str(LISTED_MATCHES),
+            f"{max(1.0, SEARCH_SECONDS - spent):.1f}", f"{max(1.0, WORK_SECONDS - spent):.1f}")
+    except Unavailable as exc:
+        logger.info("Finding as before: %s", exc)
+        return None
+    except BridgeError as exc:
+        # Not done again the slow way: what was replaced before the error stays.
+        raise ValueError(str(exc)) from None
+    searched_all, done, missed = lines[0] == "1", int(lines[1]), int(lines[2])
+    matches = [tuple(int(x) for x in line.split(",")) for line in lines[4:]]
+    listed = matches[:LISTED_MATCHES]
+    result = {"success": True, "matches": len(matches),
+              "paragraphs": sorted({m[2] for m in listed})}
+    if replace is None or not matches:
+        replace_outcome(result, len(listed), searched_all, None, find, None)
+        return result
+    result["replaced"] = done - missed
+    if missed:
+        result["warnings"] = [f"{missed} of {done} replacements read back "
+                              "differently. Read the paragraphs back."]
+    replace_outcome(result, len(listed), searched_all, done, find, replace, wildcards)
+    result["_first"] = matches[0][2]
+    return result
+
+
 def _find_all(doc, find, match_case, whole_word, wildcards, deadline):
     """(start, end, paragraph index) of each match, in order, and whether all were found.
 
@@ -537,6 +589,13 @@ def _find_replace_impl(find: str, replace: str | None, match_case: bool,
                        whole_word: bool, wildcards: bool):
     doc = backend.word.document()
     began = time.monotonic()
+    result = bridge_find_replace(lambda: names_of(doc)[1], find, replace, match_case,
+                                 whole_word, wildcards, began)
+    if result is not None:
+        first = result.pop("_first", None)
+        if first is not None:
+            follow(doc, paragraph(doc, first).Range)
+        return result
     matches, searched_all = _find_all(doc, find, match_case, whole_word, wildcards,
                                       began + SEARCH_SECONDS)
     listed = matches[:LISTED_MATCHES]

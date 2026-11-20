@@ -273,6 +273,7 @@ def run_steps(path: str) -> None:
     run_selection_steps()
     run_pdf_steps()
     run_bridge_steps()
+    run_find_bridge_steps()
     run_revision_steps()
     run_link_steps()
     run_shape_steps()
@@ -870,7 +871,9 @@ def _bridge_usable() -> bool:
 
     def ping():
         try:
-            return backend.word.vba.call(backend.word.get_app(), "Ping") == ["1"]
+            from ms_word_mcp.backend.bridge import VERSION
+
+            return backend.word.vba.call(backend.word.get_app(), "Ping") == [VERSION]
         except Unavailable:
             return False
     return backend.word.execute(ping)
@@ -935,6 +938,74 @@ def run_bridge_steps() -> None:
              check=lambda o: o["paragraphs"][0].get("deleted_text") == "to strike out "
              and "fonts" in o["paragraphs"][0])
         step("close the document of the bridge", documents._close_document_impl, False)
+    finally:
+        call_document.reset(token)
+
+
+def run_find_bridge_steps() -> None:
+    """word_find_replace through the VBA bridge: 3,000 matches in one call."""
+    other = step("a document for many matches", documents._create_document_impl, None, None)
+    if "error" in other:
+        return
+    token = call_document.set(other["full_name"])
+    try:
+        items = [{"text": "An equation comes first.", "style": "Normal"}]
+        items += [{"text": f"alpha zeta beta zeta gamma zeta {i}", "style": "Normal"}
+                  for i in range(1, 1001)]
+        items += [{"text": "Then x^2 grows.", "style": "Normal"}]
+        made = step("1,000 paragraphs of three matches each", text._insert_paragraphs_impl, items,
+                    None, None)
+        if "error" in made:
+            return
+        step("an equation before them", equations._insert_equation_impl, "E=mc^2", "latex", True,
+             "Equation", 1, None)
+        if not _bridge_usable():
+            record("the bridge loads", False, {"vba_bridge": "off"})
+            step("close the document of many matches", documents._close_document_impl, False)
+            return
+        timed, counted = {}, {}
+        try:
+            for on in (True, False):
+                os.environ["WORD_VBA_BRIDGE"] = "on" if on else "off"
+                began = time.monotonic()
+                counted[on] = json.loads(_common.run(text._find_replace_impl, "zeta", None, True,
+                                                     False, False))
+                timed[on] = round(time.monotonic() - began, 2)
+        finally:
+            os.environ.pop("WORD_VBA_BRIDGE", None)
+        fast, slow = counted[True], counted[False]
+        record("counted as before", fast.get("matches") == 3000 and "complete" not in fast
+               and fast.get("paragraphs") == slow.get("paragraphs")
+               and (slow.get("matches") == 3000 or slow.get("complete") is False),
+               {"matches": [fast.get("matches"), slow.get("matches")],
+                "complete": [fast.get("complete", True), slow.get("complete", True)],
+                "seconds": [timed[True], timed[False]]})
+        step("a wildcard search", text._find_replace_impl, "z?ta", None, True, False, True,
+             check=lambda o: o.get("matches") == 3000)
+        began = time.monotonic()
+        out = step("all 3,000 replaced in one call", text._find_replace_impl, "zeta", "omega", True,
+                   False, False, undo="Replace",
+                   check=lambda o: o.get("replaced") == 3000 and "complete" not in o
+                   and "warnings" not in o)
+        record("how long it took", True, {"seconds": round(time.monotonic() - began, 2)})
+        step("none is left", text._find_replace_impl, "zeta", None, True, False, False,
+             check=lambda o: o.get("matches") == 0)
+        step("the paragraphs read as replaced", text._find_replace_impl,
+             "alpha omega beta omega gamma omega 1000", None, True, False, False,
+             check=lambda o: o.get("matches") == 1)
+        if "error" not in out:
+            step("one undo takes the replacement back", edit._undo_impl, 1,
+                 check=lambda o: o.get("undone") == 1)
+            step("and every match is back", text._find_replace_impl, "zeta", None, True, False,
+                 False, check=lambda o: o.get("matches") == 3000)
+        after = step("text after the equation", text._find_replace_impl, "x^2", "x squared", True,
+                     False, False, undo="Replace",
+                     check=lambda o: o.get("replaced") == 1 and "warnings" not in o)
+        if after.get("paragraphs"):
+            step("lands where it was found", text._get_paragraphs_impl, after["paragraphs"][0],
+                 after["paragraphs"][0], False,
+                 check=lambda o: o["paragraphs"][0]["text"] == "Then x squared grows.")
+        step("close the document of many matches", documents._close_document_impl, False)
     finally:
         call_document.reset(token)
 
