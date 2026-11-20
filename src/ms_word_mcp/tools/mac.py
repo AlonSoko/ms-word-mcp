@@ -470,6 +470,27 @@ def insert_paragraphs(paragraphs, after, before):
         if count == 1 and _clean(doc.paragraphs[1].text_object.content.get()) == "":
             first = 1
             doc.create_range(start=start, end_=start).content.set("\r".join(texts))
+        elif int(doc.paragraphs[count].text_object.count(each=_k().math_object)):
+            # Text put before an equation's paragraph mark goes into the
+            # equation (measured). Word for Mac's scripting has no paragraph
+            # after a mark (`insert paragraph` at the end: -1708); VBA has.
+            from . import _vba
+
+            why = _vba.usable()
+            if why:
+                raise ValueError(
+                    "The document ends with an equation, and Word for Mac's scripting puts "
+                    "text after it inside the equation; ms-word-mcp's VBA bridge, which can "
+                    f"put it after, cannot be used with this Word ({why}). Insert the text "
+                    "before the equation, or add an empty paragraph after it in Word first. "
+                    "Nothing was inserted.")
+            _vba.Remote(_full(doc), "Paragraphs/Last/Range").call("InsertParagraphAfter")
+            first = count + 1
+            new_start, _ = _bounds(doc, first)
+            doc.create_range(start=new_start, end_=new_start).content.set("\r".join(texts))
+            fresh = doc.create_range(start=new_start, end_=doc.text_object.end_of_content.get())
+            fresh.font_object.reset()
+            fresh.paragraph_format.reset()
         else:
             first = count + 1
             doc.create_range(start=end - 1, end_=end - 1).content.set(

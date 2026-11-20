@@ -282,7 +282,7 @@ Through the [VBA bridge](#the-vba-bridge) only, since Word for Mac's scripting c
 - The size of complex-script text and the color of an underline
 - A style's `quick_style` and `priority`
 - Alt text on a floating shape, and where text sits from top to bottom in one
-- Replies to comments and their done state, and wildcard searches
+- Replies to comments and their done state, wildcard searches, and text added after an equation that ends the document
 
 Smaller differences:
 

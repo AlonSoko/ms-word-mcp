@@ -454,3 +454,17 @@ repeats it.
 | The SEQ Field read before the edit, after building up | "Object has been deleted": building up makes the field anew | Read before the edit too |
 | A hyphen in the new text | Built up as a minus sign (x−y) | The same |
 
+## References to equations, and text after a last equation (Word 16, both platforms)
+
+Measured 2026-11-20; `run_equation_reference_steps` in `scripts/live_check.py`
+repeats it.
+
+| What | Windows | Mac |
+|---|---|---|
+| `REF` to the bookmarked SEQ field in an equation's number | The result, "2", comes into the text as math: word_list_equations lists the referring paragraph as an equation | The same |
+| The same with `\* CHARFORMAT`, `\# 0` or `\* Arabic` | Text, not math | The same; `\* MERGEFORMAT` is still math |
+| A new equation above, then all fields updated | The references follow: 2 becomes 3 | The same |
+| The equation referred to changed (word_set_equation) | The reference still finds it | The same |
+| Paragraphs inserted at the end when the last paragraph is an equation | Their text went into the equation: "Then text." became an equation of its own | The same |
+| `Paragraph.Range.InsertParagraphAfter` on that last paragraph | A paragraph outside the equation; text put in it stays text | `insert paragraph` at the story's end: -1708; VBA's `InsertParagraphAfter` (the bridge) works |
+

@@ -269,6 +269,7 @@ def run_steps(path: str) -> None:
     run_style_language_steps()
     run_list_of_figures_steps()
     run_equation_edit_steps()
+    run_equation_reference_steps()
     run_picture_and_page_steps(Path(path).parent)
     run_review_steps()
     run_heading_number_steps()
@@ -1855,6 +1856,52 @@ def run_equation_edit_steps() -> None:
         step("a paragraph with no equation is refused", equations._set_equation_impl, 1, "a",
              "unicodemath", check=lambda o: "holds no equation" in o.get("error", ""))
         step("close the document for changing equations", documents._close_document_impl, False)
+    finally:
+        call_document.reset(token)
+
+
+def run_equation_reference_steps() -> None:
+    """References to numbered equations, as text, and text after a last equation."""
+    other = step("a document for equation references", documents._create_document_impl, None,
+                 None)
+    if "error" in other:
+        return
+    token = call_document.set(other["full_name"])
+    try:
+        made = step("a paragraph to refer from", text._insert_paragraphs_impl,
+                    [{"text": "By ", "style": "Normal"}], None, None)
+        if "error" in made:
+            return
+        step("equation (1)", equations._insert_equation_impl, "E=mc^2", "latex", True, "Equation",
+             1, None, undo="Insert equation")
+        step("equation (2), the last paragraph", equations._insert_equation_impl, "a^2+b^2=c^2",
+             "latex", True, "Equation", 2, None, undo="Insert equation")
+        step("text after the last equation stays text", text._insert_paragraphs_impl,
+             [{"text": "Then text.", "style": None}], None, None, undo="Insert paragraphs",
+             check=lambda o: o["inserted"][0]["text"] == "Then text.")
+        step("and is not an equation", equations._list_equations_impl,
+             check=lambda o: [e["index"] for e in o["equations"]] == [2, 3])
+        step("a reference to (2) by its number", references._insert_cross_reference_impl, 1, 3,
+             "number", "end", None, undo="Insert cross-reference",
+             check=lambda o: o.get("result") == "2" and "CHARFORMAT" in o.get("code", ""))
+        step("a reference to (1) as the equation shows it", references._insert_cross_reference_impl,
+             1, 2, "label_and_number", "end", None, undo="Insert cross-reference",
+             check=lambda o: o.get("result") == "(1)")
+        step("the references are text, not equations", equations._list_equations_impl,
+             check=lambda o: [e["index"] for e in o["equations"]] == [2, 3])
+        step("the paragraph reads them", text._get_paragraphs_impl, 1, 1, False,
+             check=lambda o: o["paragraphs"][0]["text"] == "By 2(1)")
+        step("an equation above them", equations._insert_equation_impl, "z=0", "latex", True,
+             "Equation", 1, None, undo="Insert equation", check=lambda o: o.get("number") == "1")
+        step("the references brought up to date", fields._update_fields_impl, "all", None, None,
+             undo="Update fields")
+        step("they follow their equations", text._get_paragraphs_impl, 1, 1, False,
+             check=lambda o: o["paragraphs"][0]["text"] == "By 3(2)")
+        step("still no equation in the text", equations._list_equations_impl,
+             check=lambda o: [e["index"] for e in o["equations"]] == [2, 3, 4])
+        step("a picture of the page", screen._get_page_image_impl, 1, None,
+             check=lambda o: o.get("page") == 1)
+        step("close the document for equation references", documents._close_document_impl, False)
     finally:
         call_document.reset(token)
 

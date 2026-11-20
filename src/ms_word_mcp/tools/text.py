@@ -309,6 +309,18 @@ def _insert_paragraphs_impl(paragraphs: list[dict], after: int | None,
             first_index = 1
             rng = doc.Range(last.Range.Start, last.Range.Start)
             rng.InsertAfter("\r".join(texts))
+        elif last.Range.OMaths.Count:
+            # Text put before an equation's paragraph mark went into the
+            # equation (measured on both platforms: "Then text." became an
+            # equation of its own). A paragraph goes after the mark instead,
+            # and the text in it, without the equation's formatting.
+            last.Range.InsertParagraphAfter()
+            first_index = count + 1
+            new = paragraph(doc, first_index).Range
+            doc.Range(new.Start, new.Start).InsertAfter("\r".join(texts))
+            fresh = doc.Range(paragraph(doc, first_index).Range.Start, doc.Content.End)
+            fresh.Font.Reset()
+            fresh.ParagraphFormat.Reset()
         else:
             first_index = count + 1
             end = last.Range.End - 1
