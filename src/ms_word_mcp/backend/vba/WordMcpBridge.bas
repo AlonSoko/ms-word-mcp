@@ -18,7 +18,7 @@ Option Explicit
 
 ' Raise it, and VERSION in backend/bridge.py, with any change to this module:
 ' a server that finds another version loaded in Word replaces it.
-Public Const BRIDGE_VERSION As String = "4"
+Public Const BRIDGE_VERSION As String = "5"
 Private Const REQUEST_FILE As String = "ms-word-mcp-bridge.request"
 Private Const ANSWER_FILE As String = "ms-word-mcp-bridge.answer"
 Private Const TEMPLATE_FILE As String = "ms-word-mcp-bridge.dotm"
@@ -118,6 +118,8 @@ Private Function Dispatch(what As String, r As Variant) As String
         Case "Member": Dispatch = Member(r)
         Case "AddStyle": Dispatch = AddStyle(r)
         Case "StyleList": Dispatch = StyleList(r)
+        Case "GroupShapes": Dispatch = GroupShapes(r)
+        Case "UngroupShape": Dispatch = UngroupShape(r)
         Case Else: Err.Raise 5, , "The bridge has no request called " & what
     End Select
     Exit Function
@@ -439,6 +441,51 @@ Private Function StyleList(r As Variant) As String
     Else
         StyleList = "ok" & vbLf & s.ListLevelNumber
     End If
+End Function
+
+' request: document, the group's name (nothing: Word's), then a line a shape's
+' name. Word for Mac's scripting has no grouping. The shapes go to
+' Shapes.Range by their places, in an array of Variants, which both platforms
+' take. An empty line is no shape: on the Mac the request ends with one.
+' answer: the group's name.
+Private Function GroupShapes(r As Variant) As String
+    Dim d As Document, places() As Variant, i As Long, j As Long, n As Long
+    Dim g As Shape, wanted As String
+    Set d = FindDocument(Decode(CStr(r(0))))
+    ReDim places(UBound(r))
+    n = 0
+    For i = 2 To UBound(r)
+        If Len(r(i)) > 0 Then
+            wanted = Decode(CStr(r(i)))
+            For j = 1 To d.Shapes.Count
+                If d.Shapes(j).Name = wanted Then places(n) = j
+            Next j
+            If IsEmpty(places(n)) Then Err.Raise 5, , "There is no shape named " & wanted & "."
+            n = n + 1
+        End If
+    Next i
+    ReDim Preserve places(n - 1)
+    Set g = d.Shapes.Range(places).Group
+    If Len(r(1)) > 0 Then g.Name = Decode(CStr(r(1)))
+    GroupShapes = "ok" & vbLf & Encode(g.Name)
+End Function
+
+' request: document, the group's name. answer: a line a shape it held. The
+' names are read before: the ShapeRange Ungroup answers refuses to be read
+' (measured on Windows); the shapes keep the names they had in the group.
+Private Function UngroupShape(r As Variant) As String
+    Dim d As Document, g As Shape, i As Long, out As String
+    Set d = FindDocument(Decode(CStr(r(0))))
+    For i = 1 To d.Shapes.Count
+        If d.Shapes(i).Name = Decode(CStr(r(1))) Then Set g = d.Shapes(i)
+    Next i
+    If g Is Nothing Then Err.Raise 5, , "There is no shape named " & Decode(CStr(r(1))) & "."
+    out = "ok"
+    For i = 1 To g.GroupItems.Count
+        out = out & vbLf & Encode(g.GroupItems(i).Name)
+    Next i
+    g.Ungroup
+    UngroupShape = out
 End Function
 
 ' Where the document's tracked deletions are, in order of their starts.

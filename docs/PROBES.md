@@ -468,3 +468,15 @@ repeats it.
 | Paragraphs inserted at the end when the last paragraph is an equation | Their text went into the equation: "Then text." became an equation of its own | The same |
 | `Paragraph.Range.InsertParagraphAfter` on that last paragraph | A paragraph outside the equation; text put in it stays text | `insert paragraph` at the story's end: -1708; VBA's `InsertParagraphAfter` (the bridge) works |
 
+## Grouping shapes (Word 16, both platforms)
+
+Measured 2026-11-20; `run_group_steps` in `scripts/live_check.py` repeats it.
+
+| What | Windows | Mac |
+|---|---|---|
+| Grouping | `Shapes.Range([...]).Group()` | Apple Events have no grouping and no group items; VBA's `Shapes.Range(...).Group` (the bridge) |
+| `Shapes.Range` in VBA | An array of Variants | An array of Strings: "Invalid procedure call or argument"; an array of Variants works. The bridge's request on the Mac ends with an empty line, which is no shape name |
+| The ShapeRange `Ungroup` answers | The shapes are ungrouped, but reading its items' names is refused ("Exception occurred", every time) | The same in VBA ("The specified value is out of range") |
+| The shapes' names after ungrouping | The names they had in the group: read from `GroupItems` before | The same |
+| A group moved by `dleft` | Its shapes move together | The same |
+

@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <strong>Real-time Microsoft Word control on Windows and macOS —<br>an MCP server with <!--tools-->98<!--/tools--> tools that works in the document beside you.</strong>
+  <strong>Real-time Microsoft Word control on Windows and macOS —<br>an MCP server with <!--tools-->100<!--/tools--> tools that works in the document beside you.</strong>
 </p>
 
 ---
@@ -282,6 +282,7 @@ Through the [VBA bridge](#the-vba-bridge) only, since Word for Mac's scripting c
 - The size of complex-script text and the color of an underline
 - A style's `quick_style` and `priority`
 - Alt text on a floating shape, and where text sits from top to bottom in one
+- Grouping shapes and ungrouping them (`word_group_shapes`, `word_ungroup_shape`), and a group's `members` in `word_list_shapes`
 - Replies to comments and their done state, wildcard searches, and text added after an equation that ends the document
 
 Smaller differences:

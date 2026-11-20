@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <strong>Windows と macOS の Microsoft Word をリアルタイムに操作——<br>あなたの隣で同じ文書を編集する、<!--tools-->98<!--/tools--> ツールの MCP サーバー</strong>
+  <strong>Windows と macOS の Microsoft Word をリアルタイムに操作——<br>あなたの隣で同じ文書を編集する、<!--tools-->100<!--/tools--> ツールの MCP サーバー</strong>
 </p>
 
 ---
@@ -282,6 +282,7 @@ Word for Mac のスクリプトでは届かないため、[VBA ブリッジ](#vb
 - 複雑な文字のサイズと、下線の色
 - スタイルの `quick_style` と `priority`
 - 浮動の図形の代替テキストと、図形内の文字の上下の配置
+- 図形のグループ化と解除（`word_group_shapes`、`word_ungroup_shape`）と、`word_list_shapes` のグループの `members`
 - コメントの返信と解決済みの状態、ワイルドカード検索、文書の最後の数式の後への文章の追加
 
 細かな違い:

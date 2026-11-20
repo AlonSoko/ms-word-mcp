@@ -286,6 +286,7 @@ def run_steps(path: str) -> None:
     run_revision_steps()
     run_link_steps()
     run_shape_steps()
+    run_group_steps()
     run_floating_picture_steps(Path(path).parent)
     run_safety_steps(Path(path).parent)
     step("picture of page 1", screen._get_page_image_impl, 1, None,
@@ -1902,6 +1903,48 @@ def run_equation_reference_steps() -> None:
         step("a picture of the page", screen._get_page_image_impl, 1, None,
              check=lambda o: o.get("page") == 1)
         step("close the document for equation references", documents._close_document_impl, False)
+    finally:
+        call_document.reset(token)
+
+
+def run_group_steps() -> None:
+    """Grouping shapes and ungrouping them."""
+    other = step("a document for grouping", documents._create_document_impl, None, None)
+    if "error" in other:
+        return
+    token = call_document.set(other["full_name"])
+    try:
+        made = step("a paragraph for the shapes", text._insert_paragraphs_impl,
+                    [{"text": "A diagram.", "style": "Normal"}], None, None)
+        if "error" in made:
+            return
+        insert = shapes._insert_shape_impl
+        for name, kind, left in (("A", "rectangle", 0.0), ("B", "oval", 150.0), ("C", "rectangle", 300.0)):
+            step(f"shape {name}", insert, kind, 1, 100.0, 50.0, {"name": name, "left": left, "top": 20.0},
+                 undo="Insert shape", check=lambda o: "error" not in o)
+        if backend.IS_MACOS and not _bridge_usable():
+            record("the bridge loads", False, {"vba_bridge": "off"})
+            return
+        step("A and B grouped by name", shapes._group_shapes_impl, ["A", "B"], "Pair",
+             undo="Group shapes",
+             check=lambda o: o.get("kind") == "group" and o.get("name") == "Pair"
+             and sorted(o.get("members", [])) == ["A", "B"])
+        step("the group is one shape in the list, with its members", shapes._list_shapes_impl, 1, 50,
+             check=lambda o: o["count"] == 2 and any(s.get("members") and sorted(s["members"]) == ["A", "B"]
+                                                     for s in o["shapes"]))
+        step("the group moves as one", shapes._set_shape_impl, "Pair", {"dleft": 30.0},
+             undo="Change shape", check=lambda o: o.get("left") == 30.0)
+        step("a picture of the grouped shapes", screen._get_page_image_impl, 1, None,
+             check=lambda o: o.get("page") == 1)
+        step("a shape that is not a group is not ungrouped", shapes._ungroup_shape_impl, "C",
+             check=lambda o: "not a group" in o.get("error", ""))
+        step("the group ungrouped", shapes._ungroup_shape_impl, "Pair", undo="Ungroup shape",
+             check=lambda o: sorted(o.get("shapes", [])) == ["A", "B"] and o.get("count") == 3)
+        step("two shapes grouped by number", shapes._group_shapes_impl, [1, 2], None,
+             undo="Group shapes", check=lambda o: o.get("kind") == "group" and len(o["members"]) == 2)
+        step("and ungrouped", shapes._ungroup_shape_impl, 1, undo="Ungroup shape",
+             check=lambda o: len(o.get("shapes", [])) == 2)
+        step("close the document for grouping", documents._close_document_impl, False)
     finally:
         call_document.reset(token)
 
