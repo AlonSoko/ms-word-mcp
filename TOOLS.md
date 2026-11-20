@@ -23,7 +23,7 @@ another conversation has chosen.
 | Floating shapes and pictures | `word_insert_shape`, `word_insert_text_box`, `word_insert_line`, `word_insert_floating_picture`, `word_list_shapes`, `word_set_shape`, `word_delete_shape` |
 | Footnotes and endnotes | `word_insert_note`, `word_list_notes`, `word_set_note`, `word_delete_note` |
 | Hyperlinks and bookmarks | `word_insert_hyperlink`, `word_list_hyperlinks`, `word_set_hyperlink`, `word_remove_hyperlink`, `word_add_bookmark`, `word_list_bookmarks`, `word_delete_bookmark` |
-| Fields and tables of contents | `word_insert_table_of_contents`, `word_insert_field`, `word_list_fields`, `word_update_fields` |
+| Fields and tables of contents | `word_insert_table_of_contents`, `word_insert_list_of_figures`, `word_insert_field`, `word_list_fields`, `word_update_fields` |
 | Tracked changes | `word_set_track_changes`, `word_list_revisions`, `word_accept_revisions`, `word_reject_revisions` |
 | Comments | `word_add_comment`, `word_list_comments`, `word_reply_to_comment`, `word_resolve_comment`, `word_delete_comments` |
 | Checks | `word_check_document` (a health check before sending), `word_check_spelling`, `word_set_language` |

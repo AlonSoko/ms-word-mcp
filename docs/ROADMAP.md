@@ -130,9 +130,9 @@ Then, ordered roughly by what the owner stressed.
 3. **Equations, the rest.** Inline equations inside a paragraph,
    chapter-style numbers (2.1) with STYLEREF, cross-references to equations,
    editing an equation in place.
-4. **Figures and tables, the rest.** A list of
-   figures, numbers with the chapter (2.1). (Splitting cells, sorting, and
-   table borders one side at a time are done.)
+4. **Figures and tables, the rest.** Numbers with the chapter (2.1). (A list
+   of figures, splitting cells, sorting, and table borders one side at a time
+   are done.)
 5. **Japanese typography, the rest.** Removing ruby outright, tate-chu-yoko.
 6. **View.** Zoom (percentage, page width, whole page), view type, follow
    edits in a second window.

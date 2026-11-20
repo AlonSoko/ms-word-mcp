@@ -267,6 +267,7 @@ def run_steps(path: str) -> None:
     run_table_more_steps()
     run_style_numbering_steps()
     run_style_language_steps()
+    run_list_of_figures_steps()
     run_picture_and_page_steps(Path(path).parent)
     run_review_steps()
     run_heading_number_steps()
@@ -1770,6 +1771,48 @@ def run_style_language_steps() -> None:
              None, None, None, None, None, None, None, None, None, None, "english_uk", None,
              undo="Define style", check=lambda o: o["style"].get("language") == "english_uk")
         step("close the document for a style's language", documents._close_document_impl, False)
+    finally:
+        call_document.reset(token)
+
+
+def run_list_of_figures_steps() -> None:
+    """Lists of figures and of tables, built from captions, and brought up to date."""
+    other = step("a document for lists of figures", documents._create_document_impl, None, None)
+    if "error" in other:
+        return
+    token = call_document.set(other["full_name"])
+    try:
+        made = step("paragraphs to caption", text._insert_paragraphs_impl,
+                    [{"text": "Lists", "style": "Heading 1"}, {"text": "A chart.", "style": "Normal"},
+                     {"text": "A photo.", "style": "Normal"}, {"text": "Some data.", "style": "Normal"}],
+                    None, None)
+        if "error" in made:
+            return
+        step("a figure caption", references._insert_caption_impl, "Sales by year", "Figure", ": ",
+             None, None, 2, None, undo="Insert caption", check=lambda o: o.get("number") == "1")
+        step("a second figure caption", references._insert_caption_impl, "The team", "Figure",
+             ": ", None, None, 4, None, undo="Insert caption", check=lambda o: o.get("number") == "2")
+        step("a table caption", references._insert_caption_impl, "Results", "Table", ": ", None,
+             None, 6, None, undo="Insert caption", check=lambda o: o.get("number") == "1")
+        step("a list of figures after the heading", fields._insert_list_of_figures_impl, "Figure", 1,
+             None, True, True, undo="Insert list of figures",
+             check=lambda o: o.get("entries") == 2 and "warnings" not in o
+             and "Sales by year" in o["first_entries"][0] and '\\c "Figure"' in o["code"])
+        step("a list of tables before the first caption", fields._insert_list_of_figures_impl,
+             "Table", None, 3, False, True, undo="Insert list of figures",
+             check=lambda o: o.get("entries") == 1 and "Results" in o["first_entries"][0])
+        step("a list of a label no caption has says so", fields._insert_list_of_figures_impl,
+             "Chart", None, None, True, True, undo="Insert list of figures",
+             check=lambda o: o.get("entries") == 0 and "no caption is labeled 'Chart'" in o["warnings"][0])
+        count = json.loads(_common.run(text._get_document_info_impl))["paragraphs"]
+        step("a third figure caption", references._insert_caption_impl, "Later", "Figure", ": ",
+             None, None, count, None, undo="Insert caption",
+             check=lambda o: o.get("number") == "3")
+        step("the lists brought up to date", fields._update_fields_impl, "tables_of_contents", None,
+             None, undo="Update fields", check=lambda o: o.get("updated", 0) >= 2)
+        step("the list of figures holds the third", text._find_replace_impl, "Later", None, True,
+             False, False, check=lambda o: o.get("matches", 0) >= 2)
+        step("close the document for lists of figures", documents._close_document_impl, False)
     finally:
         call_document.reset(token)
 

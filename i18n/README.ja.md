@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <strong>Windows と macOS の Microsoft Word をリアルタイムに操作——<br>あなたの隣で同じ文書を編集する、<!--tools-->96<!--/tools--> ツールの MCP サーバー</strong>
+  <strong>Windows と macOS の Microsoft Word をリアルタイムに操作——<br>あなたの隣で同じ文書を編集する、<!--tools-->97<!--/tools--> ツールの MCP サーバー</strong>
 </p>
 
 ---

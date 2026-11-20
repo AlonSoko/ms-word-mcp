@@ -885,6 +885,8 @@ class FakeDocument:
         self.Footnotes = FakeNotes(self)
         self.Endnotes = FakeNotes(self)
         self.Comments = FakeComments(self)
+        # Lists of figures: none, unless a test adds them.
+        self.TablesOfFigures = SimpleNamespace(Count=0, Item=lambda i: None)
         self.Hyperlinks = FakeHyperlinks()
         self.Bookmarks = FakeBookmarks()
         self.Name = name

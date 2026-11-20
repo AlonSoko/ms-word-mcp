@@ -429,3 +429,15 @@ repeats it.
 | Turning checking off | `NoProofing` | Setting `language ID` to no proofing's ID (1024) leaves it as it was; `no proofing` works, so both platforms use it |
 | A new document's Quote style, on a Mac set to English (Israel) | | `language ID` 0x0C00, the custom locale Word has no dictionary for (Checks): setting the style's language puts every paragraph in it back under checking |
 
+## Lists of figures (Word 16, both platforms)
+
+Measured 2026-11-20; `run_list_of_figures_steps` in `scripts/live_check.py`
+repeats it. A list of figures is a TOC field with `\c "Figure"`, the name the
+captions' SEQ fields have.
+
+| What | Windows | Mac |
+|---|---|---|
+| Where it is kept | `TablesOfFigures`, not `TablesOfContents` | `tables of figures` |
+| No caption of the label | Word fills the list with its own sentence, "No table of figures entries found." | The same |
+| A caption added, then `update field` on the list's field | (`TableOfFigures.Update`) | Left as it was: the new caption is not listed. The `table of figures`' `update` rebuilds it |
+
