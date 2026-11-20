@@ -2065,17 +2065,16 @@ def run_header_shape_steps() -> None:
         picture = Path(tempfile.mkdtemp()) / "live-header-picture.png"
         picture.write_bytes(screen.png(60, 30, [b"\x40\x80\xc0" * 60] * 30))
         in_header = {"part": "header", "which": "primary", "section": 1}
-        if backend.IS_MACOS:
-            step("a floating picture in the header is refused on the Mac, saying why",
-                 shapes._insert_floating_picture_impl, str(picture), 1, 40.0, None,
-                 {"header_footer": in_header},
-                 check=lambda o: "On the Mac a floating picture" in o.get("error", ""))
-        else:
-            step("a floating picture in the header", shapes._insert_floating_picture_impl,
-                 str(picture), 1, 40.0, None,
-                 {"name": "Mark", "left": 200.0, "top": 0.0, "header_footer": in_header},
-                 undo="Insert floating picture",
-                 check=lambda o: o.get("kind") == "picture" and o.get("in") == in_header)
+        step("a floating picture in the header (on the Mac through the bridge)",
+             shapes._insert_floating_picture_impl, str(picture), 1, 40.0, None,
+             {"name": "Mark", "left": 200.0, "top": 0.0, "alt_text": "Mark",
+              "header_footer": in_header},
+             undo="Insert floating picture",
+             check=lambda o: o.get("kind") == "picture" and o.get("in") == in_header
+             and o.get("width") == 40.0 and o.get("height") == 20.0
+             and o.get("left") == 200.0 and o.get("alt_text") == "Mark")
+        step("a picture of the header with it", screen._get_page_image_impl, 1, None,
+             check=lambda o: o.get("page") == 1)
         step("close the document for header shapes", documents._close_document_impl, False)
     finally:
         call_document.reset(token)

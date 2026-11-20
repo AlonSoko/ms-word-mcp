@@ -189,7 +189,7 @@ Windows では、対象が Word のアクティブな文書のとき、1 回の�
 
 ### 🖼️ 図形と浮動の画像
 
-`word_insert_shape`、`word_insert_text_box`、`word_insert_line`、`word_insert_floating_picture` で、文字の折り返し、位置、前後関係、塗り、線、テキストを指定して配置します。`word_set_shape` であとから変更でき、画像のトリミングや薄くする処理、浮動と行内の切り替えもできます。`header_footer` を指定するとヘッダーやフッターに配置でき、ロゴや罫線として全ページに表示されます（Mac では図形・テキストボックス・線。浮動の画像は Windows のみ）。
+`word_insert_shape`、`word_insert_text_box`、`word_insert_line`、`word_insert_floating_picture` で、文字の折り返し、位置、前後関係、塗り、線、テキストを指定して配置します。`word_set_shape` であとから変更でき、画像のトリミングや薄くする処理、浮動と行内の切り替えもできます。`header_footer` を指定するとヘッダーやフッターに配置でき、ロゴや罫線として全ページに表示されます（Mac では浮動の画像は [VBA ブリッジ](#vba-ブリッジ)を通します）。
 
 ### 📄 ページを見る
 
@@ -283,6 +283,7 @@ Word for Mac のスクリプトでは届かないため、[VBA ブリッジ](#vb
 - スタイルの `quick_style` と `priority`
 - 浮動の図形の代替テキストと、図形内の文字の上下の配置
 - 図形のグループ化と解除（`word_group_shapes`、`word_ungroup_shape`）と、`word_list_shapes` のグループの `members`
+- ヘッダーやフッターへの浮動の画像
 - コメントの返信と解決済みの状態、ワイルドカード検索、文書の最後の数式の後への文章の追加
 
 細かな違い:

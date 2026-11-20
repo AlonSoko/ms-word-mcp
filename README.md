@@ -189,7 +189,7 @@ Every member and constant is checked against Microsoft's documentation ([docs/re
 
 ### 🖼️ Shapes and Floating Pictures
 
-`word_insert_shape`, `word_insert_text_box`, `word_insert_line` and `word_insert_floating_picture` add objects with text wrapping, position, layer order, fill, line and text. `word_set_shape` changes them afterwards, crops and fades pictures, and moves a picture between floating and in line. With `header_footer` they go in a header or footer instead, as a logo or a rule on every page (on the Mac, shapes, text boxes and lines; a floating picture there is Windows only).
+`word_insert_shape`, `word_insert_text_box`, `word_insert_line` and `word_insert_floating_picture` add objects with text wrapping, position, layer order, fill, line and text. `word_set_shape` changes them afterwards, crops and fades pictures, and moves a picture between floating and in line. With `header_footer` they go in a header or footer instead, as a logo or a rule on every page (on the Mac a floating picture there goes through the [VBA bridge](#the-vba-bridge)).
 
 ### 📄 Seeing a Page
 
@@ -283,6 +283,7 @@ Through the [VBA bridge](#the-vba-bridge) only, since Word for Mac's scripting c
 - A style's `quick_style` and `priority`
 - Alt text on a floating shape, and where text sits from top to bottom in one
 - Grouping shapes and ungrouping them (`word_group_shapes`, `word_ungroup_shape`), and a group's `members` in `word_list_shapes`
+- A floating picture in a header or footer
 - Replies to comments and their done state, wildcard searches, and text added after an equation that ends the document
 
 Smaller differences:

@@ -505,7 +505,8 @@ repeats it.
 | The document's shapes | Leave out those in headers and footers | The same: `count shapes` of the document was 0 with two in the header |
 | A header's or footer's shapes | Every header's and footer's, whichever is asked | The same, through `header footer`'s `shape` elements |
 | Where a shape is | `Anchor.StoryType` (7 primary header, 9 primary footer...) and `Anchor.Sections(1)` | `anchor`'s `story type` (`primary header story`...) |
-| A floating picture | Made in line at the header paragraph, then `ConvertToShape` | Not done: the picture is made in line first, and `header footer` has no inline shapes |
+| A floating picture | Made in line at the header paragraph, then `ConvertToShape` | Apple Events make a picture in line first, and `header footer` has no inline shapes: VBA's `HeaderFooter.Shapes.AddPicture` with the paragraph as its anchor (the bridge), at the picture's own size, then sized as asked |
+| The VBA bridge reaching a header's shape (alt text) | - | Through its header, `Sections(n).Headers(i).Shapes(name)`: the document's `Shapes` has no item by that name ("The item with the specified name wasn't found") |
 
 ## Numbers with the chapter (Word 16, both platforms)
 

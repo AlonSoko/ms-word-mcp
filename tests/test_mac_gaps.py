@@ -198,6 +198,7 @@ def test_on_the_mac_alt_text_and_the_vertical_anchor_go_through_the_bridge(word,
     word({"Shapes": {"Item": lambda name: shape}})
     monkeypatch.setattr(shapes.backend, "word", SimpleNamespace(
         document=lambda: None, vba=_vba.backend.word.vba, get_app=lambda: None))
+    monkeypatch.setattr(shapes, "_mac_where", lambda doc, name: None)  # in the body
     s = SimpleNamespace(name=SimpleNamespace(get=lambda: "Box 1"))
     remote, why = shapes._mac_shape_remote(s)
     remote.AlternativeText = "A blue box"
@@ -281,3 +282,18 @@ def test_text_that_is_cut_off_stays_cut_off(keys):
 def test_with_no_space_after_word_is_taken_at_its_word(keys):
     s = _Frame(need=5, space=0.0)
     assert shapes._mac_cut_off(s) is True and s.log == []
+
+
+def test_on_the_mac_a_header_shape_is_reached_through_its_header(word, monkeypatch):
+    shape = {"AlternativeText": ""}
+    header = {"Shapes": {"Item": lambda name: shape}}
+    word({"Sections": {"Item": lambda n: {"Headers": {"Item": lambda i: header}}}})
+    monkeypatch.setattr(shapes.backend, "word", SimpleNamespace(
+        document=lambda: None, vba=_vba.backend.word.vba, get_app=lambda: None))
+    monkeypatch.setattr(shapes, "_mac_where", lambda doc, name: ("header", "primary", 1))
+    s = SimpleNamespace(name=SimpleNamespace(get=lambda: "Logo"))
+    remote, why = shapes._mac_shape_remote(s)
+    assert why is None and "Sections/Item(n1)/Headers/Item(n1)/Shapes" in remote._path
+    remote.AlternativeText = "Logo"
+    assert shape == {"AlternativeText": "Logo"}
+

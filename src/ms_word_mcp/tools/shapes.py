@@ -192,8 +192,20 @@ def _mac_shape_remote(s, *more):
     why = _vba.usable()
     if why:
         return None, why
-    path = _vba.path_of("Shapes", ("Item", s.name.get()), *more)
-    return _vba.Remote(m._full(backend.word.document()), path), None
+    doc = backend.word.document()
+    name = s.name.get()
+    where = _mac_where(doc, name)
+    if where is None:
+        path = _vba.path_of("Shapes", ("Item", name), *more)
+    else:
+        # A header's or footer's shape is not in the document's Shapes.
+        from .page import WHICH
+
+        part, which, section = where
+        path = _vba.path_of("Sections", ("Item", section),
+                            "Headers" if part == "header" else "Footers",
+                            ("Item", WHICH[which]), "Shapes", ("Item", name), *more)
+    return _vba.Remote(m._full(doc), path), None
 
 
 # -- arguments ---------------------------------------------------------------------
@@ -484,9 +496,10 @@ NO_OWN_PART = ("Section {section} has no {which} {part} of its own: give it one 
 HF_PARAGRAPH = ("The {which} {part} of section {section} has {count} paragraph(s), not "
                 "{index}. Nothing was inserted.")
 PICTURE_IN_HF_ON_MAC = (
-    "On the Mac a floating picture cannot be put in a header or footer yet: Word for "
-    "Mac's scripting makes a picture in line first, and has none in a header. A shape, "
-    "text box or line can; on Windows a picture can too. Nothing was inserted.")
+    "On the Mac a floating picture goes in a header or footer through ms-word-mcp's VBA "
+    "bridge (Word for Mac's scripting makes a picture in line first, and has none in a "
+    "header), and the bridge cannot be used with this Word ({why}). A shape, text box or "
+    "line can go there without it. Nothing was inserted.")
 GROUP_IN_BODY = ("'{name}' is in a {part}: grouping is for shapes in the body of the "
                  "document.")
 
@@ -1634,8 +1647,8 @@ def _mac_insert_floating_picture(path, index, width, height, spec):
 
     if not os.path.isfile(path):
         raise ValueError(f"There is no file at '{path}'.")
-    if spec.pop("header_footer", None) is not None:
-        raise ValueError(PICTURE_IN_HF_ON_MAC)
+    if spec.get("header_footer") is not None:
+        return _mac_header_picture(path, index, width, height, spec)
     doc = backend.word.document()
     m._para(doc, index)
     _mac_check_name(doc, spec.get("name"))
@@ -1660,6 +1673,41 @@ def _mac_insert_floating_picture(path, index, width, height, spec):
     if warnings:
         out["warnings"] = [*warnings, *out.get("warnings", [])]
     return out
+
+
+def _mac_header_picture(path, index, width, height, spec):
+    """A floating picture in a header or footer, made through the VBA bridge."""
+    from . import _vba
+    from . import mac as m
+    from ..backend.bridge import decode, encode
+    from .page import WHICH
+    from .references import _mac_stage, proportional
+
+    doc = backend.word.document()
+    place = spec["header_footer"]
+    _mac_check_name(doc, spec.get("name"))
+    _mac_anchor(doc, index, dict(spec))  # checks the place and the paragraph
+    why = _vba.usable()
+    if why:
+        raise ValueError(PICTURE_IN_HF_ON_MAC.format(why=why))
+    staged, copied = _mac_stage(path)
+    try:
+        word = backend.word
+        name = decode(word.vba.call(
+            word.get_app(), "HeaderPicture", encode(m._full(doc)), str(place["section"]),
+            encode(place["part"]), str(WHICH[place["which"]]), str(index),
+            encode(staged))[0])
+    finally:
+        if copied:
+            os.remove(staged)
+    s = _mac_shape(doc, name)
+    if width is not None or height is not None:
+        w, h = proportional(width, height, s.width.get(), s.height.get())
+        s.lock_aspect_ratio.set(False)
+        s.width.set(w)
+        s.height.set(h)
+    rest = {k: v for k, v in spec.items() if k != "header_footer"}
+    return _mac_finish_new(doc, name, _new_spec(rest, "square"), "picture")
 
 
 @mac_impl(_list_shapes_impl)

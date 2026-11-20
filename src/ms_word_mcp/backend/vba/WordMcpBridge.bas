@@ -18,7 +18,7 @@ Option Explicit
 
 ' Raise it, and VERSION in backend/bridge.py, with any change to this module:
 ' a server that finds another version loaded in Word replaces it.
-Public Const BRIDGE_VERSION As String = "5"
+Public Const BRIDGE_VERSION As String = "6"
 Private Const REQUEST_FILE As String = "ms-word-mcp-bridge.request"
 Private Const ANSWER_FILE As String = "ms-word-mcp-bridge.answer"
 Private Const TEMPLATE_FILE As String = "ms-word-mcp-bridge.dotm"
@@ -119,6 +119,7 @@ Private Function Dispatch(what As String, r As Variant) As String
         Case "AddStyle": Dispatch = AddStyle(r)
         Case "StyleList": Dispatch = StyleList(r)
         Case "GroupShapes": Dispatch = GroupShapes(r)
+        Case "HeaderPicture": Dispatch = HeaderPicture(r)
         Case "UngroupShape": Dispatch = UngroupShape(r)
         Case Else: Err.Raise 5, , "The bridge has no request called " & what
     End Select
@@ -468,6 +469,23 @@ Private Function GroupShapes(r As Variant) As String
     Set g = d.Shapes.Range(places).Group
     If Len(r(1)) > 0 Then g.Name = Decode(CStr(r(1)))
     GroupShapes = "ok" & vbLf & Encode(g.Name)
+End Function
+
+' request: document, section, "header" or "footer", which (1 primary, 2 first, 3
+' even), paragraph, the picture's path. A floating picture anchored to that
+' paragraph of the header or footer, at its own size: Word for Mac's scripting
+' makes a picture in line first, and has none in a header. answer: its name.
+Private Function HeaderPicture(r As Variant) As String
+    Dim d As Document, hf As HeaderFooter, s As Shape
+    Set d = FindDocument(Decode(CStr(r(0))))
+    If Decode(CStr(r(2))) = "header" Then
+        Set hf = d.Sections(CLng(r(1))).Headers(CLng(r(3)))
+    Else
+        Set hf = d.Sections(CLng(r(1))).Footers(CLng(r(3)))
+    End If
+    Set s = hf.Shapes.AddPicture(Decode(CStr(r(5))), False, True, 0, 0, , , _
+                                 hf.Range.Paragraphs(CLng(r(4))).Range)
+    HeaderPicture = "ok" & vbLf & Encode(s.Name)
 End Function
 
 ' request: document, the group's name. answer: a line a shape it held. The

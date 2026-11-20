@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 HERE = os.path.dirname(os.path.abspath(__file__))
 NAME = "ms-word-mcp-bridge.dotm"
 TEMPLATE = os.path.join(HERE, "vba", NAME)
-VERSION = "5"  # BRIDGE_VERSION in WordMcpBridge.bas; a test keeps them together
+VERSION = "6"  # BRIDGE_VERSION in WordMcpBridge.bas; a test keeps them together
 SETTING = "WORD_VBA_BRIDGE"
 
 #: Word for Mac's own folder, which it reaches without asking for access.
