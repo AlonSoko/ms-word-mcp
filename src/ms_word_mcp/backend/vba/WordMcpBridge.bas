@@ -18,7 +18,7 @@ Option Explicit
 
 ' Raise it, and VERSION in backend/bridge.py, with any change to this module:
 ' a server that finds another version loaded in Word replaces it.
-Public Const BRIDGE_VERSION As String = "8"
+Public Const BRIDGE_VERSION As String = "9"
 Private Const REQUEST_FILE As String = "ms-word-mcp-bridge.request"
 Private Const ANSWER_FILE As String = "ms-word-mcp-bridge.answer"
 Private Const TEMPLATE_FILE As String = "ms-word-mcp-bridge.dotm"
@@ -126,6 +126,8 @@ Private Function Dispatch(what As String, r As Variant) As String
         Case "ContentControlDelete": Dispatch = ContentControlDelete(r)
         Case "FieldList": Dispatch = FieldList(r)
         Case "FieldUnlink": Dispatch = FieldUnlink(r)
+        Case "FieldSet": Dispatch = FieldSet(r)
+        Case "NoteFieldAdd": Dispatch = NoteFieldAdd(r)
         Case "UngroupShape": Dispatch = UngroupShape(r)
         Case Else: Err.Raise 5, , "The bridge has no request called " & what
     End Select
@@ -802,12 +804,13 @@ End Function
 
 ' Fields whose code holds r(1) (any, if empty), in the main text (story 1),
 ' the footnotes (2) and the endnotes (3):
-' story|begin|result start|result end|paragraph|code|result, the paragraph
-' counted in the main text (0 in a note). `begin` is where the field starts,
-' which FieldUnlink takes.
+' story|begin|result start|result end|paragraph|code|result|note, the paragraph
+' counted in the main text (0 in a note), `note` the number of the footnote or
+' endnote that holds it (0 in the main text). `begin` is where the field
+' starts, which FieldUnlink and FieldSet take.
 Private Function FieldList(r As Variant) As String
     Dim d As Document, s As Range, f As Field, has As String, story As Variant
-    Dim lines() As String, n As Long, code As String
+    Dim lines() As String, n As Long, code As String, para As Long
     Set d = FindDocument(Decode(CStr(r(0))))
     has = Unwire(CStr(r(1)))
     ReDim lines(0)
@@ -820,15 +823,112 @@ Private Function FieldList(r As Variant) As String
                 code = f.Code.Text
                 If Len(has) = 0 Or InStr(code, has) > 0 Then
                     ReDim Preserve lines(n)
+                    ' Not IIf: VBA computes both of its branches, and a note's position is
+                    ' no position of the main text (past its end, "Value out of range").
+                    para = 0
+                    If story = 1 Then para = d.Range(0, f.Code.Start).Paragraphs.Count
                     lines(n) = story & "|" & (f.Code.Start - 1) & "|" & f.Result.Start & "|" _
-                        & f.Result.End & "|" & IIf(story = 1, d.Range(0, f.Code.Start).Paragraphs.Count, 0) _
-                        & "|" & Wire(code) & "|" & Wire(f.Result.Text)
+                        & f.Result.End & "|" & para _
+                        & "|" & Wire(code) & "|" & Wire(f.Result.Text) & "|" & NoteOf(d, CLng(story), f)
                     n = n + 1
                 End If
             Next f
         End If
     Next story
     FieldList = Join(lines, vbLf)
+End Function
+
+' The number of the footnote (story 2) or endnote (3) that holds field f, as
+' Word shows it (its index, counted from the notes' starting number); 0 else.
+Private Function NoteOf(d As Document, story As Long, f As Field) As Long
+    Dim i As Long
+    If story = 2 Then
+        For i = 1 To d.Footnotes.Count
+            If f.Result.InRange(d.Footnotes(i).Range) Then
+                NoteOf = i + d.Footnotes.StartingNumber - 1
+                Exit Function
+            End If
+        Next i
+    ElseIf story = 3 Then
+        For i = 1 To d.Endnotes.Count
+            If f.Result.InRange(d.Endnotes(i).Range) Then
+                NoteOf = i + d.Endnotes.StartingNumber - 1
+                Exit Function
+            End If
+        Next i
+    End If
+End Function
+
+' Sets the text of field f's result and its formatting: spans "start,end,flags"
+' joined by ";", counted from the result's start, flags of i (italic), b
+' (bold), u (underline), p (superscript), s (subscript), c (small capitals).
+' The rest of the result is left plain, as Mendeley Desktop leaves it.
+Private Sub SetResult(f As Field, text As String, spans As String)
+    Dim res As Range, part As Range, span As Variant, bits() As String, start As Long
+    Set res = f.Result
+    res.Text = text
+    Set res = f.Result
+    res.Font.Bold = False
+    res.Font.Italic = False
+    res.Font.Underline = 0
+    res.Font.Superscript = False
+    res.Font.Subscript = False
+    res.Font.SmallCaps = False
+    res.LanguageID = 1024 ' wdNoProofing, as Mendeley Desktop sets it
+    start = res.Start
+    If Len(spans) = 0 Then Exit Sub
+    For Each span In Split(spans, ";")
+        bits = Split(CStr(span), ",")
+        Set part = f.Result.Duplicate
+        part.SetRange start + CLng(bits(0)), start + CLng(bits(1))
+        If InStr(bits(2), "i") > 0 Then part.Font.Italic = True
+        If InStr(bits(2), "b") > 0 Then part.Font.Bold = True
+        If InStr(bits(2), "u") > 0 Then part.Font.Underline = 1
+        If InStr(bits(2), "p") > 0 Then part.Font.Superscript = True
+        If InStr(bits(2), "s") > 0 Then part.Font.Subscript = True
+        If InStr(bits(2), "c") > 0 Then part.Font.SmallCaps = True
+    Next span
+End Sub
+
+Private Function FieldAnswer(d As Document, story As Long, f As Field) As String
+    FieldAnswer = "ok" & vbLf & (f.Code.Start - 1) & "|" & f.Result.Start & "|" & f.Result.End _
+        & "|" & NoteOf(d, story, f)
+End Function
+
+' The field of story r(1) that starts at r(2): its code becomes r(3) (unless
+' empty) and its result r(4), formatted by the spans r(5) (SetResult):
+' begin|result start|result end|note.
+Private Function FieldSet(r As Variant) As String
+    Dim d As Document, s As Range, f As Field, begin As Long, code As String
+    Set d = FindDocument(Decode(CStr(r(0))))
+    Set s = StoryOf(d, CLng(r(1)))
+    begin = CLng(r(2))
+    If Not s Is Nothing Then
+        For Each f In s.Fields
+            If f.Code.Start - 1 = begin Then
+                code = Unwire(CStr(r(3)))
+                If Len(code) > 0 And f.Code.Text <> code Then f.Code.Text = code
+                SetResult f, Unwire(CStr(r(4))), CStr(r(5))
+                FieldSet = FieldAnswer(d, CLng(r(1)), f)
+                Exit Function
+            End If
+        Next f
+    End If
+    Err.Raise 5, , "No field starts at " & begin & "."
+End Function
+
+' A footnote at position r(1) of the main text, holding one field: code r(2),
+' result r(3) formatted by the spans r(4). Made as Mendeley Desktop makes it,
+' a QUOTE field whose code is then replaced, which Word turns into the kind
+' the new code names: begin|result start|result end|note.
+Private Function NoteFieldAdd(r As Variant) As String
+    Dim d As Document, n As Footnote, f As Field
+    Set d = FindDocument(Decode(CStr(r(0))))
+    Set n = d.Footnotes.Add(Range:=d.Range(CLng(r(1)), CLng(r(1))), Reference:="")
+    Set f = d.Fields.Add(n.Range, 35, Unwire(CStr(r(3))), False) ' 35: wdFieldQuote
+    f.Code.Text = Unwire(CStr(r(2)))
+    SetResult f, Unwire(CStr(r(3))), CStr(r(4))
+    NoteFieldAdd = FieldAnswer(d, 2, f)
 End Function
 
 ' The field of story r(1) that starts at r(2) becomes its result's text, as

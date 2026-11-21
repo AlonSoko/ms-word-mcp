@@ -292,6 +292,7 @@ def run_steps(path: str) -> None:
     run_move_anchor_steps()
     run_content_control_steps()
     run_unlink_field_steps()
+    run_note_field_steps()
     run_chapter_number_steps()
     run_floating_picture_steps(Path(path).parent)
     run_safety_steps(Path(path).parent)
@@ -2306,6 +2307,100 @@ def run_unlink_field_steps() -> None:
         step("none left to unlink is said", fields._unlink_fields_impl, "QUOTE", None, True,
              check=lambda o: "No field" in o.get("error", ""))
         step("close the document for fields to unlink", documents._close_document_impl, False)
+    finally:
+        call_document.reset(token)
+
+
+def _note_field_add(at, code, text_, spans=()):
+    return {"success": True, **fields.note_field_add(at, code, text_, list(spans))}
+
+
+def _field_set(story, begin, code, text_, spans=()):
+    return {"success": True, **fields.field_set(story, begin, code, text_, list(spans))}
+
+
+def _fields_holding(has):
+    return {"success": True, "fields": fields.field_list(has)}
+
+
+for _impl in (_note_field_add, _field_set, _fields_holding):  # one body for both platforms
+    _common.mac_impl(_impl)(_impl)
+del _impl
+
+
+def _footnote_runs(path: str) -> list[tuple[str, bool]]:
+    """(text, italic) of each run in the saved file's footnotes, in order."""
+    import re
+    import zipfile
+
+    with zipfile.ZipFile(path) as z:
+        if "word/footnotes.xml" not in z.namelist():
+            return []
+        xml = z.read("word/footnotes.xml").decode("utf-8")
+    out = []
+    for run in re.findall(r"<w:r[ >].*?</w:r>", xml, re.S):
+        texts = "".join(re.findall(r"<w:t(?: [^>]*)?>([^<]*)</w:t>", run))
+        if texts:
+            out.append((texts, bool(re.search(r"<w:i/>|<w:i w:val=\"(?:1|true)\"/>", run))))
+    return out
+
+
+def _note_fields_path() -> str:
+    """Where the notes' test document is saved: on the Mac in Word's own
+    container (no sandbox prompt), elsewhere in the temporary folder."""
+    if sys.platform == "darwin":
+        folder = os.path.expanduser("~/Library/Containers/com.microsoft.Word/Data/Documents/ms-word-mcp-tests")
+    else:
+        folder = os.path.join(tempfile.gettempdir(), "ms-word-mcp-tests")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "note-fields.docx")
+    if os.path.exists(path):
+        os.remove(path)
+    return path
+
+
+def run_note_field_steps() -> None:
+    """A field in a new footnote, and a field's code and formatted result
+    replaced (what Mendeley Desktop's footnote citations need)."""
+    path = _note_fields_path()
+    other = step("a document for fields in notes", documents._create_document_impl, None, path)
+    if "error" in other:
+        return
+    token = call_document.set(other["full_name"])
+    code = 'ADDIN TEST_FIELD {"n":1}'
+    try:
+        made = step("two paragraphs", text._insert_paragraphs_impl,
+                    [{"text": "One.", "style": "Normal"}, {"text": "Two.", "style": "Normal"}], None, None)
+        if "error" in made:
+            return
+        from ms_word_mcp.tools import content_controls as cc
+
+        at = cc.place(1, None, None, "end")
+        step("a field in a new footnote after 'One.'", _note_field_add,
+             at, code, "Smith, Journal of Tests.", [(7, 23, "i")], undo="Insert note field",
+             check=lambda o: o["note"] == 1 and o["story"] == 2)
+        at2 = cc.place(2, None, None, "end")
+        step("another after 'Two.'", _note_field_add, at2, code.replace("1", "2"), "Ibid.",
+             undo="Insert note field", check=lambda o: o["note"] == 2)
+        listed = step("both listed with their notes' numbers", _fields_holding, "TEST_FIELD",
+                      check=lambda o: [(f["story"], f["note"], f["code"], f["result"]) for f in o["fields"]]
+                      == [(2, 1, code, "Smith, Journal of Tests."), (2, 2, code.replace("1", "2"), "Ibid.")])
+        step("the notes read as the fields' text", notes._list_notes_impl, "footnote", 1, 10,
+             check=lambda o: [n["text"] for n in o["notes"]] == ["Smith, Journal of Tests.", "Ibid."])
+        first = listed["fields"][0] if "fields" in listed else {"begin": -1}
+        step("the first field's code and text replaced, italics moved", _field_set,
+             2, first["begin"], code.replace("1", "3"), "Smith, “A Title,” 12.", [(7, 17, "i")],
+             undo="Set field", check=lambda o: o["note"] == 1)
+        step("read back", _fields_holding, "TEST_FIELD",
+             check=lambda o: [(f["note"], f["code"], f["result"]) for f in o["fields"]]
+             == [(1, code.replace("1", "3"), "Smith, “A Title,” 12."), (2, code.replace("1", "2"), "Ibid.")])
+        step("save", documents._save_document_impl)
+        runs = _footnote_runs(path)
+        italic = "".join(t for t, i in runs if i)
+        record("the italics are where the spans put them", italic == "“A Title,”", runs)
+        step("a field that is not there is said", _field_set, 2, 99999, None, "x",
+             check=lambda o: "No field" in o.get("error", ""))
+        step("close the document for fields in notes", documents._close_document_impl, False)
     finally:
         call_document.reset(token)
 

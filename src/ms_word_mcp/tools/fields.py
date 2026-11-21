@@ -637,8 +637,9 @@ STORIES = {1: "main text", 2: "footnotes", 3: "endnotes"}
 def field_list(has: str = "") -> list[dict]:
     """The fields whose code holds `has` (every field, if empty), in the main
     text, the footnotes and the endnotes: their story, where the field begins
-    (`begin`, which unlink() takes), where its result starts and ends, its
-    paragraph (in the main text; 0 in a note), its code and its result. On
+    (`begin`, which unlink() and field_set() take), where its result starts
+    and ends, its paragraph (in the main text; 0 in a note), its code, its
+    result and the number of the note that holds it (0 in the main text). On
     the Mac through the VBA bridge, which reaches the notes' fields."""
     doc = backend.word.document()
     out = []
@@ -646,10 +647,10 @@ def field_list(has: str = "") -> list[dict]:
         from .content_controls import _bridge, unwire, wire
 
         for line in _bridge(doc)("FieldList", wire(has)):
-            story, begin, start, end, index, code, result = line.split("|", 6)
+            story, begin, start, end, index, code, result, note = line.split("|", 7)
             out.append({"story": int(story), "begin": int(begin), "start": int(start),
                         "end": int(end), "index": int(index), "code": unwire(code),
-                        "result": clean_text(unwire(result))})
+                        "result": clean_text(unwire(result)), "note": int(note)})
         return out
     for story in STORIES:
         try:
@@ -664,8 +665,98 @@ def field_list(has: str = "") -> list[dict]:
             out.append({"story": story, "begin": f.Code.Start - 1, "start": f.Result.Start,
                         "end": f.Result.End,
                         "index": doc.Range(0, f.Code.Start).Paragraphs.Count if story == 1 else 0,
-                        "code": code, "result": clean_text(f.Result.Text or "")})
+                        "code": code, "result": clean_text(f.Result.Text or ""),
+                        "note": _note_of(doc, story, f)})
     return out
+
+
+def _note_of(doc, story: int, f) -> int:
+    """The number of the footnote (story 2) or endnote (3) that holds field f, as
+    Word shows it; 0 in the main text."""
+    if story not in (2, 3):
+        return 0
+    notes = doc.Footnotes if story == 2 else doc.Endnotes
+    for i in range(1, notes.Count + 1):
+        if f.Result.InRange(notes.Item(i).Range):
+            return i + notes.StartingNumber - 1
+    return 0
+
+
+#: Formatting flags of field_set()'s spans, as Word's font properties name them.
+SPAN_FLAGS = {"i": "Italic", "b": "Bold", "u": "Underline", "p": "Superscript", "s": "Subscript", "c": "SmallCaps"}
+
+
+def _spans_wire(spans: list[tuple[int, int, str]]) -> str:
+    for a, b, flags in spans:
+        if not (0 <= a <= b) or set(flags) - set(SPAN_FLAGS):
+            raise ValueError(f"A span must be start <= end with flags of {''.join(SPAN_FLAGS)}: {(a, b, flags)}")
+    return ";".join(f"{a},{b},{flags}" for a, b, flags in spans if flags and b > a)
+
+
+def _set_result(doc, f, text: str, spans: list[tuple[int, int, str]]) -> None:
+    res = f.Result
+    res.Text = text
+    res = f.Result
+    font = res.Font
+    font.Bold = font.Italic = font.Superscript = font.Subscript = font.SmallCaps = False
+    font.Underline = 0
+    res.LanguageID = 1024  # wdNoProofing, as Mendeley Desktop sets it
+    start = res.Start
+    for a, b, flags in spans:
+        if not flags or b <= a:
+            continue
+        part = doc.StoryRanges(res.StoryType).Duplicate
+        part.SetRange(start + a, start + b)
+        for flag in flags:
+            setattr(part.Font, SPAN_FLAGS[flag], 1 if flag == "u" else True)
+
+
+def _field_answer(doc, story: int, f) -> dict:
+    return {"story": story, "begin": f.Code.Start - 1, "start": f.Result.Start, "end": f.Result.End,
+            "note": _note_of(doc, story, f)}
+
+
+def field_set(story: int, begin: int, code: str | None, text: str,
+              spans: list[tuple[int, int, str]] = ()) -> dict:
+    """The field of `story` that begins at `begin`: its code replaced (unless
+    None), its result made `text`, plain but for `spans` (start, end, flags
+    of SPAN_FLAGS, counted from the result's start). Where it now is."""
+    doc = backend.word.document()
+    wired = _spans_wire(list(spans))
+    if backend.IS_MACOS:
+        from .content_controls import _bridge, wire
+
+        b, start, end, note = _bridge(doc)("FieldSet", str(story), str(begin), wire(code or ""), wire(text),
+                                           wired)[0].split("|")
+        return {"story": story, "begin": int(b), "start": int(start), "end": int(end), "note": int(note)}
+    found = doc.StoryRanges(story).Fields
+    for i in range(1, found.Count + 1):
+        f = found.Item(i)
+        if f.Code.Start - 1 == begin:
+            if code and f.Code.Text != code:
+                f.Code.Text = code
+            _set_result(doc, f, text, list(spans))
+            return _field_answer(doc, story, f)
+    raise ValueError(f"No field begins at {begin}.")
+
+
+def note_field_add(at: int, code: str, text: str, spans: list[tuple[int, int, str]] = ()) -> dict:
+    """A footnote at position `at` of the main text holding one field (code,
+    result formatted as field_set() formats it), made as Mendeley Desktop
+    makes its citations: a QUOTE field whose code is then replaced, which Word
+    turns into the kind the code names. Where the field is, and the note's number."""
+    doc = backend.word.document()
+    wired = _spans_wire(list(spans))
+    if backend.IS_MACOS:
+        from .content_controls import _bridge, wire
+
+        b, start, end, note = _bridge(doc)("NoteFieldAdd", str(at), wire(code), wire(text), wired)[0].split("|")
+        return {"story": 2, "begin": int(b), "start": int(start), "end": int(end), "note": int(note)}
+    note = doc.Footnotes.Add(doc.Range(at, at), "")
+    f = doc.Fields.Add(note.Range, 35, text, False)  # 35: wdFieldQuote
+    f.Code.Text = code
+    _set_result(doc, f, text, list(spans))
+    return _field_answer(doc, 2, f)
 
 
 def unlink(story: int, begin: int) -> tuple[int, int]:
