@@ -290,6 +290,7 @@ def run_steps(path: str) -> None:
     run_group_steps()
     run_header_shape_steps()
     run_move_anchor_steps()
+    run_content_control_steps()
     run_chapter_number_steps()
     run_floating_picture_steps(Path(path).parent)
     run_safety_steps(Path(path).parent)
@@ -2189,6 +2190,67 @@ def run_move_anchor_steps() -> None:
         step("is not moved into the body", shapes._set_shape_impl, "H", {"anchor_to": 1},
              check=lambda o: "moves a shape of the body" in o.get("error", ""))
         step("close the document for moving anchors", documents._close_document_impl, False)
+    finally:
+        call_document.reset(token)
+
+
+def run_content_control_steps() -> None:
+    """Content controls: inserted, read, changed, locked and deleted."""
+    from ms_word_mcp.tools import content_controls as cc
+
+    other = step("a document for content controls", documents._create_document_impl, None, None)
+    if "error" in other:
+        return
+    token = call_document.set(other["full_name"])
+    long_tag = "ADDIN_DATA_" + "QUJDRA==" * 2500
+    try:
+        made = step("two paragraphs", text._insert_paragraphs_impl,
+                    [{"text": "Dear reader, the date is here.", "style": "Normal"},
+                     {"text": "שלום עולם", "style": "Normal"}], None, None)
+        if "error" in made:
+            return
+        step("a control right after a word, with a tag and a title",
+             cc._insert_content_control_impl, 1, "21 November", "plain_text", "date-field",
+             "Date", False, False, "the date is", None, "end", undo="Insert content control",
+             check=lambda o: (o.get("text"), o.get("tag"), o.get("title"), o.get("type"))
+             == ("21 November", "date-field", "Date", "plain_text"))
+        step("the paragraph reads with it", text._get_paragraphs_impl, 1, 1, False,
+             check=lambda o: o["paragraphs"][0]["text"] == "Dear reader, the date is21 November here.")
+        step("a control with a 20,000-character tag", cc._insert_content_control_impl, 1, "[1]",
+             "rich_text", long_tag, "", False, False, "reader", None, "end",
+             undo="Insert content control", check=lambda o: o.get("tag_length") == len(long_tag))
+        step("a control with a Hebrew tag and text", cc._insert_content_control_impl, 2, "טקסט",
+             "rich_text", "תג-עברי", "כותרת", False, False, None, None, "end",
+             undo="Insert content control",
+             check=lambda o: (o.get("tag"), o.get("title"), o.get("text")) == ("תג-עברי", "כותרת", "טקסט"))
+        step("three listed in order, the long tag whole on request",
+             cc._list_content_controls_impl, None, 1, 50, True,
+             check=lambda o: o["count"] == 3 and o["controls"][0]["tag"] == long_tag
+             and [c["index"] for c in o["controls"]] == [1, 1, 2])
+        step("only those of a tag prefix", cc._list_content_controls_impl, "date-", 1, 50, False,
+             check=lambda o: o["count"] == 1 and o["controls"][0]["text"] == "21 November")
+        step("its text changed", cc._set_content_control_impl, 1, "date-", "22 November", None,
+             None, None, None, undo="Change content control",
+             check=lambda o: o.get("text") == "22 November" and o.get("tag") == "date-field")
+        step("its contents locked", cc._set_content_control_impl, 1, "date-", None, None, None,
+             True, True, undo="Change content control",
+             check=lambda o: o.get("lock_contents") is True and o.get("lock_control") is True)
+        step("a locked control takes a new text and stays locked", cc._set_content_control_impl,
+             1, "date-", "23 November", None, None, None, None, undo="Change content control",
+             check=lambda o: o.get("text") == "23 November" and o.get("lock_contents") is True)
+        step("a control that is not there", cc._set_content_control_impl, 9, None, "x", None,
+             None, None, None, check=lambda o: "There is no content control 9" in o.get("error", ""))
+        step("a picture of the page", screen._get_page_image_impl, 1, None,
+             check=lambda o: o.get("page") == 1)
+        step("the locked one deleted, its text kept", cc._delete_content_control_impl, 1, "date-",
+             True, undo="Delete content control",
+             check=lambda o: o.get("left") == 2 and o.get("kept_text") == "23 November")
+        step("the Hebrew one deleted with its text", cc._delete_content_control_impl, 2, None,
+             False, undo="Delete content control", check=lambda o: o.get("left") == 1)
+        step("the text reads as it should", text._get_paragraphs_impl, 1, 2, False,
+             check=lambda o: [p["text"] for p in o["paragraphs"]]
+             == ["Dear reader[1], the date is23 November here.", "שלום עולם"])
+        step("close the document for content controls", documents._close_document_impl, False)
     finally:
         call_document.reset(token)
 

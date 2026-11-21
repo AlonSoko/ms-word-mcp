@@ -316,11 +316,13 @@ mainly Latin document. East Asian layouts measure spacing in grid lines
 mcp = WordServer("ms_word_mcp", lifespan=app_lifespan, instructions=INSTRUCTIONS)
 
 from .tools import (  # noqa: E402,F401 - mac registers the Mac halves
-    checks, comments, documents, edit, equations, fields, formatting, links, lists, mac, notes, page,
-    references, revisions, screen, selection, shapes, tables, text, view)
+    checks, comments, content_controls, documents, edit, equations, fields, formatting, links,
+    lists, mac, notes, page, references, revisions, screen, selection, shapes, tables, text,
+    view)
 
-for module in (documents, text, selection, formatting, lists, tables, references, shapes, notes, links, equations,
-               fields, revisions, comments, checks, page, view, screen, edit):
+for module in (documents, text, selection, formatting, lists, tables, references, content_controls,
+               shapes, notes, links, equations, fields, revisions, comments, checks, page, view, screen,
+               edit):
     module.register(mcp)
 
 
@@ -429,6 +431,7 @@ def summary(description):
 AREAS = {"documents": "Documents", "text": "Reading and writing text", "selection": "What the user has selected",
          "formatting": "Formatting and styles", "lists": "Lists", "tables": "Tables",
          "references": "Pictures, captions and cross-references",
+         "content_controls": "Content controls: the tagged boxes of templates, forms and add-ins",
          "shapes": "Floating shapes, text boxes and lines",
          "notes": "Footnotes and endnotes", "links": "Hyperlinks and bookmarks",
          "page": "The page: setup, vertical text, headers, footers, ruby",

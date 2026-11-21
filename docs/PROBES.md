@@ -535,3 +535,17 @@ repeats it.
 | The shape at the old anchor deleted after | Moved: it goes with its new paragraph when text is inserted above, and the other shape of the old paragraph stays |
 | There is no setter for a shape's anchor in either object model | |
 
+## Content controls (Word 16, both platforms)
+
+Measured 2026-11-21; `run_content_control_steps` in `scripts/live_check.py`
+repeats it.
+
+| What | Windows | Mac |
+|---|---|---|
+| Reaching them | `Document.ContentControls`, `ContentControls.Add(type, range)` over COM | Word for Mac's dictionary has no content control class or command; VBA's `ContentControls` (the bridge) works |
+| A tag of 19,517 characters (an add-in's base64 data) | Set and read back whole | The same through VBA; it travels in the bridge's request as it is (plain ASCII) |
+| A Hebrew tag, title and text | Read back as set | The same, encoded in the request |
+| A control added at a collapsed range right after a word | Its text sits against the word ("is21 November"), no space added | The same |
+| A new text for a control whose contents are locked | Refused until `LockContents` is false; set false, the text, true again | The same |
+| `Delete(False)` / `Delete(True)` | The control goes, its text stays / goes too | The same |
+

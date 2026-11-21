@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <strong>Windows と macOS の Microsoft Word をリアルタイムに操作——<br>あなたの隣で同じ文書を編集する、<!--tools-->101<!--/tools--> ツールの MCP サーバー</strong>
+  <strong>Windows と macOS の Microsoft Word をリアルタイムに操作——<br>あなたの隣で同じ文書を編集する、<!--tools-->105<!--/tools--> ツールの MCP サーバー</strong>
 </p>
 
 ---
@@ -187,6 +187,10 @@ Windows では、対象が Word のアクティブな文書のとき、1 回の�
 
 `word_insert_equation` は LaTeX または UnicodeMath を受け取り、Word 自身の数式エディターで組み立てます。`numbered` を付けると、番号は右端にフィールドとして入るので、数式を挿入すると以降の番号が振り直されます。`word_insert_inline_equation` は段落の文中に数式を入れます（文の先頭・末尾、またはプレースホルダーの位置）。`word_get_equation` と `word_set_equation` は段落の中の何番目か（`nth`）で指定します。`chapter` を付けると、番号付きの数式とキャプション（`word_insert_caption`）が章ごとに (2.1)、図 2.1 のように振られます。章番号は直前の番号付き見出しから取ります。
 
+### 🗂️ コンテンツ コントロール
+
+`word_list_content_controls`、`word_insert_content_control`、`word_set_content_control`、`word_delete_content_control` で、テンプレートやフォーム、アドインが文書に置くタグ付きの枠（テキスト、タグ、タイトル、ロック）を読み書きします。アドインがデータを入れる数万文字のタグもそのまま扱えます。Mac では Word のスクリプトにコンテンツ コントロールがないため、[VBA ブリッジ](#vba-ブリッジ)を通します。
+
 ### 🖼️ 図形と浮動の画像
 
 `word_insert_shape`、`word_insert_text_box`、`word_insert_line`、`word_insert_floating_picture` で、文字の折り返し、位置、前後関係、塗り、線、テキストを指定して配置します。`word_set_shape` であとから変更でき、画像のトリミングや薄くする処理、浮動と行内の切り替え、別の段落へのアンカーの移動（`anchor_to`）もできます。`header_footer` を指定するとヘッダーやフッターに配置でき、ロゴや罫線として全ページに表示されます（Mac では浮動の画像は [VBA ブリッジ](#vba-ブリッジ)を通します）。
@@ -284,6 +288,7 @@ Word for Mac のスクリプトでは届かないため、[VBA ブリッジ](#vb
 - 浮動の図形の代替テキストと、図形内の文字の上下の配置
 - 図形のグループ化と解除（`word_group_shapes`、`word_ungroup_shape`）と、`word_list_shapes` のグループの `members`
 - ヘッダーやフッターへの浮動の画像
+- コンテンツ コントロール（`word_list_content_controls` など）
 - コメントの返信と解決済みの状態、ワイルドカード検索、文書の最後の数式の後への文章の追加
 
 細かな違い:

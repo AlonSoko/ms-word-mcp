@@ -18,7 +18,7 @@ Option Explicit
 
 ' Raise it, and VERSION in backend/bridge.py, with any change to this module:
 ' a server that finds another version loaded in Word replaces it.
-Public Const BRIDGE_VERSION As String = "6"
+Public Const BRIDGE_VERSION As String = "7"
 Private Const REQUEST_FILE As String = "ms-word-mcp-bridge.request"
 Private Const ANSWER_FILE As String = "ms-word-mcp-bridge.answer"
 Private Const TEMPLATE_FILE As String = "ms-word-mcp-bridge.dotm"
@@ -120,6 +120,10 @@ Private Function Dispatch(what As String, r As Variant) As String
         Case "StyleList": Dispatch = StyleList(r)
         Case "GroupShapes": Dispatch = GroupShapes(r)
         Case "HeaderPicture": Dispatch = HeaderPicture(r)
+        Case "ContentControlList": Dispatch = ContentControlList(r)
+        Case "ContentControlAdd": Dispatch = ContentControlAdd(r)
+        Case "ContentControlSet": Dispatch = ContentControlSet(r)
+        Case "ContentControlDelete": Dispatch = ContentControlDelete(r)
         Case "UngroupShape": Dispatch = UngroupShape(r)
         Case Else: Err.Raise 5, , "The bridge has no request called " & what
     End Select
@@ -486,6 +490,107 @@ Private Function HeaderPicture(r As Variant) As String
     Set s = hf.Shapes.AddPicture(Decode(CStr(r(5))), False, True, 0, 0, , , _
                                  hf.Range.Paragraphs(CLng(r(4))).Range)
     HeaderPicture = "ok" & vbLf & Encode(s.Name)
+End Function
+
+' Content controls: Word for Mac's scripting has none. A tag or a text travels
+' as "r:" and the text itself when it is plain ASCII (add-ins keep tens of
+' thousands of base64 characters in a tag), else as "e:" and Encode's codes.
+
+Private Function Wire(s As String) As String
+    Dim i As Long
+    For i = 1 To Len(s)
+        If AscW(Mid$(s, i, 1)) > 126 Or AscW(Mid$(s, i, 1)) < 32 Then
+            Wire = "e:" & Encode(s)
+            Exit Function
+        End If
+    Next i
+    Wire = "r:" & s
+End Function
+
+Private Function Unwire(s As String) As String
+    If Left$(s, 2) = "e:" Then
+        Unwire = Decode(Mid$(s, 3))
+    Else
+        Unwire = Mid$(s, 3)
+    End If
+End Function
+
+Private Function ControlAt(d As Document, at As Long) As ContentControl
+    Dim cc As ContentControl
+    For Each cc In d.ContentControls
+        If cc.Range.Start = at Then
+            Set ControlAt = cc
+            Exit Function
+        End If
+    Next cc
+    Err.Raise 5, , "No content control's text starts at " & at & "."
+End Function
+
+' request: document, the start of the tags wanted (nothing: every control).
+' answer: a line a control: start|end|paragraph|type|locks (two digits)|
+' title|text|tag, the last three wired.
+Private Function ContentControlList(r As Variant) As String
+    Dim d As Document, cc As ContentControl, prefix As String, lines() As String, n As Long
+    Set d = FindDocument(Decode(CStr(r(0))))
+    prefix = Unwire(CStr(r(1)))
+    ReDim lines(d.ContentControls.Count)
+    lines(0) = "ok"
+    n = 1
+    For Each cc In d.ContentControls
+        If Len(prefix) = 0 Or Left$(cc.Tag, Len(prefix)) = prefix Then
+            lines(n) = cc.Range.Start & "|" & cc.Range.End & "|" _
+                & d.Range(0, cc.Range.Start).Paragraphs.Count & "|" & cc.Type & "|" _
+                & IIf(cc.LockContentControl, "1", "0") & IIf(cc.LockContents, "1", "0") & "|" _
+                & Wire(cc.Title) & "|" & Wire(cc.Range.Text) & "|" & Wire(cc.Tag)
+            n = n + 1
+        End If
+    Next cc
+    ReDim Preserve lines(n - 1)
+    ContentControlList = Join(lines, vbLf)
+End Function
+
+' request: document, start, end, type, tag, title, text (the last three wired).
+' answer: start|end of the new control's text.
+Private Function ContentControlAdd(r As Variant) As String
+    Dim d As Document, cc As ContentControl
+    Set d = FindDocument(Decode(CStr(r(0))))
+    Set cc = d.ContentControls.Add(CLng(r(3)), d.Range(CLng(r(1)), CLng(r(2))))
+    cc.Tag = Unwire(CStr(r(4)))
+    cc.Title = Unwire(CStr(r(5)))
+    cc.Range.Text = Unwire(CStr(r(6)))
+    ContentControlAdd = "ok" & vbLf & cc.Range.Start & "|" & cc.Range.End
+End Function
+
+' request: document, the start of the control's text, then tag, title, text
+' (wired, or "-" to leave), lock the control, lock its contents ("1", "0" or
+' "-"). answer: start|end of its text.
+Private Function ContentControlSet(r As Variant) As String
+    Dim d As Document, cc As ContentControl, held As Boolean
+    Set d = FindDocument(Decode(CStr(r(0))))
+    Set cc = ControlAt(d, CLng(r(1)))
+    held = cc.LockContents
+    If r(2) <> "-" Then cc.Tag = Unwire(CStr(r(2)))
+    If r(3) <> "-" Then cc.Title = Unwire(CStr(r(3)))
+    If r(4) <> "-" Then
+        cc.LockContents = False
+        cc.Range.Text = Unwire(CStr(r(4)))
+        cc.LockContents = held
+    End If
+    If r(5) <> "-" Then cc.LockContentControl = (r(5) = "1")
+    If r(6) <> "-" Then cc.LockContents = (r(6) = "1")
+    ContentControlSet = "ok" & vbLf & cc.Range.Start & "|" & cc.Range.End
+End Function
+
+' request: document, the start of the control's text, "1" to delete its text
+' too. answer: nothing.
+Private Function ContentControlDelete(r As Variant) As String
+    Dim d As Document, cc As ContentControl
+    Set d = FindDocument(Decode(CStr(r(0))))
+    Set cc = ControlAt(d, CLng(r(1)))
+    cc.LockContentControl = False
+    If r(2) = "1" Then cc.LockContents = False
+    cc.Delete r(2) = "1"
+    ContentControlDelete = "ok"
 End Function
 
 ' request: document, the group's name. answer: a line a shape it held. The
