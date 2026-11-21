@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <strong>Windows と macOS の Microsoft Word をリアルタイムに操作——<br>あなたの隣で同じ文書を編集する、<!--tools-->105<!--/tools--> ツールの MCP サーバー</strong>
+  <strong>Windows と macOS の Microsoft Word をリアルタイムに操作——<br>あなたの隣で同じ文書を編集する、<!--tools-->106<!--/tools--> ツールの MCP サーバー</strong>
 </p>
 
 ---
@@ -189,7 +189,9 @@ Windows では、対象が Word のアクティブな文書のとき、1 回の�
 
 ### 🗂️ コンテンツ コントロール
 
-`word_list_content_controls`、`word_insert_content_control`、`word_set_content_control`、`word_delete_content_control` で、テンプレートやフォーム、アドインが文書に置くタグ付きの枠（テキスト、タグ、タイトル、ロック）を読み書きします。アドインがデータを入れる数万文字のタグもそのまま扱えます。Mac では Word のスクリプトにコンテンツ コントロールがないため、[VBA ブリッジ](#vba-ブリッジ)を通します。
+`word_list_content_controls`、`word_insert_content_control`、`word_set_content_control`、`word_delete_content_control` で、テンプレートやフォーム、アドインが文書に置くタグ付きの枠（テキスト、タグ、タイトル、ロック）を読み書きします。アドインがデータを入れる数万文字のタグもそのまま扱えます。`word_insert_content_control` の `around` で、文書に既にある文字列を書式ごとコントロールにできます。Mac では Word のスクリプトにコンテンツ コントロールがないため、[VBA ブリッジ](#vba-ブリッジ)を通します。
+
+`word_unlink_fields` は、フィールドを表示中の文字列（書式もそのまま）に変えます。種類（`kind`）またはコードに含む文字列（`contains`）で選び、本文・脚注・文末脚注が対象です。
 
 ### 🖼️ 図形と浮動の画像
 
@@ -289,6 +291,7 @@ Word for Mac のスクリプトでは届かないため、[VBA ブリッジ](#vb
 - 図形のグループ化と解除（`word_group_shapes`、`word_ungroup_shape`）と、`word_list_shapes` のグループの `members`
 - ヘッダーやフッターへの浮動の画像
 - コンテンツ コントロール（`word_list_content_controls` など）
+- 脚注・文末脚注のフィールドの文字列化（`word_unlink_fields`）
 - コメントの返信と解決済みの状態、ワイルドカード検索、文書の最後の数式の後への文章の追加
 
 細かな違い:

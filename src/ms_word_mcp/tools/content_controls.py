@@ -107,18 +107,23 @@ def _com_at(doc, start: int):
     raise ValueError(f"No content control's text starts at {start}.")
 
 
-def add(at: int, kind: str = "rich_text", tag: str = "", title: str = "", text: str = "") -> tuple[int, int]:
-    """A content control at `at` (an empty place); the start and end of its text."""
+def add(at: int, kind: str = "rich_text", tag: str = "", title: str = "", text: str = "",
+        end: int | None = None) -> tuple[int, int]:
+    """A content control at `at` (an empty place) holding `text`, or, given
+    `end`, around the text from `at` to `end`, which stays as it is (its
+    formatting too). The start and end of its text."""
     doc = backend.word.document()
+    stop = at if end is None else end
     if backend.IS_MACOS:
-        line = _bridge(doc)("ContentControlAdd", str(at), str(at), str(KINDS[kind]), wire(tag),
-                            wire(title), wire(text))[0]
-        start, end = line.split("|")
-        return int(start), int(end)
-    cc = doc.ContentControls.Add(KINDS[kind], doc.Range(at, at))
+        line = _bridge(doc)("ContentControlAdd", str(at), str(stop), str(KINDS[kind]), wire(tag),
+                            wire(title), "-" if end is not None else wire(text))[0]
+        start, finish = line.split("|")
+        return int(start), int(finish)
+    cc = doc.ContentControls.Add(KINDS[kind], doc.Range(at, stop))
     cc.Tag = tag
     cc.Title = title
-    cc.Range.Text = text
+    if end is None:
+        cc.Range.Text = text
     return cc.Range.Start, cc.Range.End
 
 
@@ -165,10 +170,21 @@ def remove(start: int, with_text: bool) -> None:
 def place(index: int, after: str | None, before: str | None, position: str) -> int:
     """Where in paragraph `index` something goes: right after or before the
     first occurrence of a text, or at the start or end of its text."""
+    if after or before:
+        s, e = find(index, after or before)
+        return e if after else s
+    return _find(index, None, position)
+
+
+def find(index: int, text: str) -> tuple[int, int]:
+    """Where the first occurrence of `text` in paragraph `index` starts and ends."""
+    return _find(index, text, "end")
+
+
+def _find(index: int, anchor: str | None, position: str):
     from ._word import locate_spans
 
     doc = backend.word.document()
-    anchor = after or before
     if backend.IS_MACOS:
         from . import mac as m
 
@@ -198,8 +214,7 @@ def place(index: int, after: str | None, before: str | None, position: str) -> i
 
     if content.find(anchor) < 0:
         raise ValueError(f"'{anchor}' is not in paragraph {index}. Nothing was changed.")
-    s, e = locate_spans(content, [anchor], read, start, hidden)[0]
-    return e if after else s
+    return locate_spans(content, [anchor], read, start, hidden)[0]
 
 
 def show(start: int, end: int) -> None:
@@ -266,12 +281,22 @@ class ListContentControlsInput(Input):
 class InsertContentControlInput(_Place):
     index: int = Field(..., ge=1, description="The paragraph the control goes in.")
     text: str = Field("", max_length=32767, description="The text it holds.")
+    around: str | None = Field(None, min_length=1, max_length=32767, description=(
+        "Instead of `text` and a place: make the first occurrence of this text in the "
+        "paragraph the control's, as it is, formatting and all."))
     kind: Literal[tuple(KINDS)] = Field("rich_text", description=(  # type: ignore[valid-type]
         "rich_text holds formatted text; plain_text holds text of one format."))
     tag: str = Field("", max_length=100000, description="A tag, for a program to find it by.")
     title: str = Field("", max_length=255, description="The title Word shows on its box.")
     lock_control: bool = Field(False, description="The control itself cannot be deleted.")
     lock_contents: bool = Field(False, description="Its text cannot be edited.")
+
+    @model_validator(mode="after")
+    def _around_alone(self):
+        if self.around is not None and (self.text or self.after or self.before):
+            raise ValueError("`around` makes text already there the control's: give it "
+                             "without `text`, `after` or `before`.")
+        return self
 
 
 class SetContentControlInput(Input):
@@ -311,9 +336,12 @@ def _list_content_controls_impl(tag_prefix, start, limit, full_tags):
 
 
 def _insert_content_control_impl(index, text, kind, tag, title, lock_control, lock_contents,
-                                 after, before, position):
-    at = place(index, after, before, position)
-    start, end = add(at, kind, tag, title, text)
+                                 after, before, position, around):
+    if around is not None:
+        s, e = find(index, around)
+        start, end = add(s, kind, tag, title, end=e)
+    else:
+        start, end = add(place(index, after, before, position), kind, tag, title, text)
     if lock_control or lock_contents:
         start, end = update(start, lock_control=lock_control or None,
                             lock_contents=lock_contents or None)
@@ -361,12 +389,13 @@ def register(mcp) -> None:
     async def word_insert_content_control(params: InsertContentControlInput) -> str:
         """Insert a content control holding `text`, with a tag and title,
         right after or before a text of a paragraph, or at its start or end;
-        optionally locked. On the Mac this goes through ms-word-mcp's VBA
-        bridge."""
+        or, with `around`, around a text already there, which keeps its
+        formatting. Optionally locked. On the Mac this goes through
+        ms-word-mcp's VBA bridge."""
         p = params
         return await call(_insert_content_control_impl, p.index, p.text, p.kind, p.tag, p.title,
                           p.lock_control, p.lock_contents, p.after, p.before, p.position,
-                          undo="Insert content control")
+                          p.around, undo="Insert content control")
 
     @mcp.tool(name="word_set_content_control",
               annotations=annotations("Change a content control", WRITES))

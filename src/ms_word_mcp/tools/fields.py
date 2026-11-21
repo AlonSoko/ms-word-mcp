@@ -628,6 +628,101 @@ def _mac_insert_field(index, code, position, match):
             "result": m._clean(f.result_range.content.get() or "")}
 
 
+# -- fields in every story, and fields turned into their text ------------------------------
+
+#: The stories a field may be in.
+STORIES = {1: "main text", 2: "footnotes", 3: "endnotes"}
+
+
+def field_list(has: str = "") -> list[dict]:
+    """The fields whose code holds `has` (every field, if empty), in the main
+    text, the footnotes and the endnotes: their story, where the field begins
+    (`begin`, which unlink() takes), where its result starts and ends, its
+    paragraph (in the main text; 0 in a note), its code and its result. On
+    the Mac through the VBA bridge, which reaches the notes' fields."""
+    doc = backend.word.document()
+    out = []
+    if backend.IS_MACOS:
+        from .content_controls import _bridge, unwire, wire
+
+        for line in _bridge(doc)("FieldList", wire(has)):
+            story, begin, start, end, index, code, result = line.split("|", 6)
+            out.append({"story": int(story), "begin": int(begin), "start": int(start),
+                        "end": int(end), "index": int(index), "code": unwire(code),
+                        "result": clean_text(unwire(result))})
+        return out
+    for story in STORIES:
+        try:
+            found = doc.StoryRanges(story).Fields
+        except Exception:  # noqa: BLE001 - a document without notes has no such story
+            continue
+        for i in range(1, found.Count + 1):
+            f = found.Item(i)
+            code = f.Code.Text or ""
+            if has and has not in code:
+                continue
+            out.append({"story": story, "begin": f.Code.Start - 1, "start": f.Result.Start,
+                        "end": f.Result.End,
+                        "index": doc.Range(0, f.Code.Start).Paragraphs.Count if story == 1 else 0,
+                        "code": code, "result": clean_text(f.Result.Text or "")})
+    return out
+
+
+def unlink(story: int, begin: int) -> tuple[int, int]:
+    """The field of `story` that begins at `begin` becomes its result's text,
+    formatted as it was: where that text starts and ends."""
+    doc = backend.word.document()
+    if backend.IS_MACOS:
+        from .content_controls import _bridge
+
+        start, end = _bridge(doc)("FieldUnlink", str(story), str(begin))[0].split("|")
+        return int(start), int(end)
+    found = doc.StoryRanges(story).Fields
+    for i in range(1, found.Count + 1):
+        f = found.Item(i)
+        if f.Code.Start - 1 == begin:
+            size = f.Result.End - f.Result.Start
+            f.Unlink()
+            return begin, begin + size
+    raise ValueError(f"No field begins at {begin}.")
+
+
+class UnlinkFieldsInput(Input):
+    kind: str | None = Field(None, min_length=1, max_length=40, description=(
+        "The fields of this type: the first word of their code (QUOTE, HYPERLINK, TOC, "
+        "ADDIN, DATE...)."))
+    contains: str | None = Field(None, min_length=1, max_length=255, description=(
+        "The fields whose code holds this text."))
+    notes: bool = Field(True, description="Those in footnotes and endnotes too.")
+
+    @model_validator(mode="after")
+    def _some(self):
+        if self.kind is None and self.contains is None:
+            raise ValueError("Say which fields: give `kind`, `contains` or both.")
+        return self
+
+
+def _unlink_fields_impl(kind, contains, notes):
+    wanted = [f for f in field_list(contains or "")
+              if (kind is None or _kind(f["code"]) == kind.upper()) and (notes or f["story"] == 1)]
+    if not wanted:
+        raise ValueError("No field is of that kind or holds that text. Nothing was changed. "
+                         "word_list_fields lists the fields.")
+    done = []
+    # From the end back: what changes moves nothing before it.
+    for f in sorted(wanted, key=lambda f: (f["story"], f["begin"]), reverse=True):
+        unlink(f["story"], f["begin"])
+        entry = {"in": STORIES[f["story"]], "kind": _kind(f["code"]), "text": f["result"][:120]}
+        if f["story"] == 1:
+            entry["index"] = f["index"]
+        done.append(entry)
+    done.reverse()
+    return {"success": True, "unlinked": len(done), "fields": done}
+
+
+mac_impl(_unlink_fields_impl)(_unlink_fields_impl)  # one body: field_list() and unlink() choose
+
+
 def register(mcp) -> None:
     @mcp.tool(name="word_insert_table_of_contents",
               annotations=annotations("Insert a table of contents", WRITES))
@@ -665,6 +760,16 @@ def register(mcp) -> None:
         each shows."""
         p = params
         return await call(_list_fields_impl, p.start, p.end)
+
+    @mcp.tool(name="word_unlink_fields", annotations=annotations("Turn fields into text", WRITES))
+    async def word_unlink_fields(params: UnlinkFieldsInput) -> str:
+        """Turn fields into the text they show, formatted as it is: the fields
+        of a type (`kind`), or those whose code holds a text (`contains`),
+        in the main text and, unless `notes` is false, the footnotes and
+        endnotes. The text stays; the field, and what it would update to,
+        goes. On the Mac this goes through ms-word-mcp's VBA bridge."""
+        p = params
+        return await call(_unlink_fields_impl, p.kind, p.contains, p.notes, undo="Unlink fields")
 
     @mcp.tool(name="word_insert_field", annotations=annotations("Insert a field", WRITES))
     async def word_insert_field(params: InsertFieldInput) -> str:

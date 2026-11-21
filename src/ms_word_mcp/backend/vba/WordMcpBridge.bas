@@ -18,7 +18,7 @@ Option Explicit
 
 ' Raise it, and VERSION in backend/bridge.py, with any change to this module:
 ' a server that finds another version loaded in Word replaces it.
-Public Const BRIDGE_VERSION As String = "7"
+Public Const BRIDGE_VERSION As String = "8"
 Private Const REQUEST_FILE As String = "ms-word-mcp-bridge.request"
 Private Const ANSWER_FILE As String = "ms-word-mcp-bridge.answer"
 Private Const TEMPLATE_FILE As String = "ms-word-mcp-bridge.dotm"
@@ -124,6 +124,8 @@ Private Function Dispatch(what As String, r As Variant) As String
         Case "ContentControlAdd": Dispatch = ContentControlAdd(r)
         Case "ContentControlSet": Dispatch = ContentControlSet(r)
         Case "ContentControlDelete": Dispatch = ContentControlDelete(r)
+        Case "FieldList": Dispatch = FieldList(r)
+        Case "FieldUnlink": Dispatch = FieldUnlink(r)
         Case "UngroupShape": Dispatch = UngroupShape(r)
         Case Else: Err.Raise 5, , "The bridge has no request called " & what
     End Select
@@ -557,7 +559,8 @@ Private Function ContentControlAdd(r As Variant) As String
     Set cc = d.ContentControls.Add(CLng(r(3)), d.Range(CLng(r(1)), CLng(r(2))))
     cc.Tag = Unwire(CStr(r(4)))
     cc.Title = Unwire(CStr(r(5)))
-    cc.Range.Text = Unwire(CStr(r(6)))
+    ' "-": the control goes around the text already there, which keeps it as it is.
+    If CStr(r(6)) <> "-" Then cc.Range.Text = Unwire(CStr(r(6)))
     ContentControlAdd = "ok" & vbLf & cc.Range.Start & "|" & cc.Range.End
 End Function
 
@@ -786,4 +789,64 @@ Private Function CommentState(r As Variant) As String
         out = out & vbLf & IIf(c.Done, "1", "0") & "," & at & "," & c.Range.Start
     Next i
     CommentState = out
+End Function
+
+
+' -- fields: listed in every story, and turned into their text ---------------
+
+' The main text, the footnotes and the endnotes: what a field may be in.
+Private Function StoryOf(d As Document, story As Long) As Range
+    On Error Resume Next
+    Set StoryOf = d.StoryRanges(story)
+End Function
+
+' Fields whose code holds r(1) (any, if empty), in the main text (story 1),
+' the footnotes (2) and the endnotes (3):
+' story|begin|result start|result end|paragraph|code|result, the paragraph
+' counted in the main text (0 in a note). `begin` is where the field starts,
+' which FieldUnlink takes.
+Private Function FieldList(r As Variant) As String
+    Dim d As Document, s As Range, f As Field, has As String, story As Variant
+    Dim lines() As String, n As Long, code As String
+    Set d = FindDocument(Decode(CStr(r(0))))
+    has = Unwire(CStr(r(1)))
+    ReDim lines(0)
+    lines(0) = "ok"
+    n = 1
+    For Each story In Array(1, 2, 3)
+        Set s = StoryOf(d, CLng(story))
+        If Not s Is Nothing Then
+            For Each f In s.Fields
+                code = f.Code.Text
+                If Len(has) = 0 Or InStr(code, has) > 0 Then
+                    ReDim Preserve lines(n)
+                    lines(n) = story & "|" & (f.Code.Start - 1) & "|" & f.Result.Start & "|" _
+                        & f.Result.End & "|" & IIf(story = 1, d.Range(0, f.Code.Start).Paragraphs.Count, 0) _
+                        & "|" & Wire(code) & "|" & Wire(f.Result.Text)
+                    n = n + 1
+                End If
+            Next f
+        End If
+    Next story
+    FieldList = Join(lines, vbLf)
+End Function
+
+' The field of story r(1) that starts at r(2) becomes its result's text, as
+' it is formatted: start|end of that text.
+Private Function FieldUnlink(r As Variant) As String
+    Dim d As Document, s As Range, f As Field, begin As Long, size As Long
+    Set d = FindDocument(Decode(CStr(r(0))))
+    Set s = StoryOf(d, CLng(r(1)))
+    begin = CLng(r(2))
+    If Not s Is Nothing Then
+        For Each f In s.Fields
+            If f.Code.Start - 1 = begin Then
+                size = f.Result.End - f.Result.Start
+                f.Unlink
+                FieldUnlink = "ok" & vbLf & begin & "|" & (begin + size)
+                Exit Function
+            End If
+        Next f
+    End If
+    Err.Raise 5, , "No field starts at " & begin & "."
 End Function

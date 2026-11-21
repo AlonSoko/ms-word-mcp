@@ -548,4 +548,7 @@ repeats it.
 | A control added at a collapsed range right after a word | Its text sits against the word ("is21 November"), no space added | The same |
 | A new text for a control whose contents are locked | Refused until `LockContents` is false; set false, the text, true again | The same |
 | `Delete(False)` / `Delete(True)` | The control goes, its text stays / goes too | The same |
+| `ContentControls.Add(type, range)` around text already there, its text not set | The text stays as it was, its formatting (bold) too | The same, through the bridge |
+| `Field.Unlink` | The field becomes its result's text, formatted as it was; the text starts where the field began | The same, through the bridge (AppleScript has no unlink, and no fields in notes) |
+| `StoryRanges(2)` / `(3)` in a document without footnotes / endnotes | An error, caught: no such story | The same |
 

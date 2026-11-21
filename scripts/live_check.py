@@ -291,6 +291,7 @@ def run_steps(path: str) -> None:
     run_header_shape_steps()
     run_move_anchor_steps()
     run_content_control_steps()
+    run_unlink_field_steps()
     run_chapter_number_steps()
     run_floating_picture_steps(Path(path).parent)
     run_safety_steps(Path(path).parent)
@@ -2211,16 +2212,16 @@ def run_content_control_steps() -> None:
             return
         step("a control right after a word, with a tag and a title",
              cc._insert_content_control_impl, 1, "21 November", "plain_text", "date-field",
-             "Date", False, False, "the date is", None, "end", undo="Insert content control",
+             "Date", False, False, "the date is", None, "end", None, undo="Insert content control",
              check=lambda o: (o.get("text"), o.get("tag"), o.get("title"), o.get("type"))
              == ("21 November", "date-field", "Date", "plain_text"))
         step("the paragraph reads with it", text._get_paragraphs_impl, 1, 1, False,
              check=lambda o: o["paragraphs"][0]["text"] == "Dear reader, the date is21 November here.")
         step("a control with a 20,000-character tag", cc._insert_content_control_impl, 1, "[1]",
-             "rich_text", long_tag, "", False, False, "reader", None, "end",
+             "rich_text", long_tag, "", False, False, "reader", None, "end", None,
              undo="Insert content control", check=lambda o: o.get("tag_length") == len(long_tag))
         step("a control with a Hebrew tag and text", cc._insert_content_control_impl, 2, "טקסט",
-             "rich_text", "תג-עברי", "כותרת", False, False, None, None, "end",
+             "rich_text", "תג-עברי", "כותרת", False, False, None, None, "end", None,
              undo="Insert content control",
              check=lambda o: (o.get("tag"), o.get("title"), o.get("text")) == ("תג-עברי", "כותרת", "טקסט"))
         step("three listed in order, the long tag whole on request",
@@ -2250,7 +2251,61 @@ def run_content_control_steps() -> None:
         step("the text reads as it should", text._get_paragraphs_impl, 1, 2, False,
              check=lambda o: [p["text"] for p in o["paragraphs"]]
              == ["Dear reader[1], the date is23 November here.", "שלום עולם"])
+        step("a third paragraph, a part of it bold", text._insert_paragraphs_impl,
+             [{"text": "Keep this bold part as it is.", "style": "Normal"}], None, None)
+        step("the part made bold", formatting._format_text_impl, 3, None, "bold part",
+             {"bold": True}, undo="Format text")
+        made = step("a control around text already there", cc._insert_content_control_impl, 3, "",
+                    "rich_text", "wrapped", "", False, False, None, None, "end", "bold part",
+                    undo="Insert content control",
+                    check=lambda o: (o.get("text"), o.get("tag")) == ("bold part", "wrapped"))
+        if "error" not in made:
+            step("its text kept its formatting", cc._list_content_controls_impl, "wrapped", 1, 5,
+                 False, check=lambda o: o["count"] == 1
+                 and _bold(cc.controls("wrapped")[0]["start"], cc.controls("wrapped")[0]["end"]))
+        step("the paragraph reads as before", text._get_paragraphs_impl, 3, 3, False,
+             check=lambda o: o["paragraphs"][0]["text"] == "Keep this bold part as it is.")
         step("close the document for content controls", documents._close_document_impl, False)
+    finally:
+        call_document.reset(token)
+
+
+def _bold(start: int, end: int) -> bool:
+    """Whether the text from start to end is bold, read from Word."""
+    doc = backend.word.document()
+    if backend.IS_MACOS:
+        return bool(doc.create_range(start=start, end_=end).font_object.bold.get())
+    return bool(doc.Range(start, end).Font.Bold)
+
+
+def run_unlink_field_steps() -> None:
+    """Fields turned into their text, chosen by type or by what their code holds."""
+    other = step("a document for fields to unlink", documents._create_document_impl, None, None)
+    if "error" in other:
+        return
+    token = call_document.set(other["full_name"])
+    try:
+        made = step("three paragraphs", text._insert_paragraphs_impl,
+                    [{"text": "First: ", "style": "Normal"}, {"text": "Second: ", "style": "Normal"},
+                     {"text": "Page ", "style": "Normal"}], None, None)
+        if "error" in made:
+            return
+        for index, code in ((1, 'QUOTE "Alpha"'), (2, 'QUOTE "Beta"'), (3, "PAGE")):
+            step(f"a {code.split()[0]} field in paragraph {index}", fields._insert_field_impl, index,
+                 code, "end", None, undo="Insert field")
+        step("the QUOTE fields made text, the PAGE field kept", fields._unlink_fields_impl, "quote",
+             None, True, undo="Unlink fields",
+             check=lambda o: o.get("unlinked") == 2
+             and [(f["index"], f["text"]) for f in o["fields"]] == [(1, "Alpha"), (2, "Beta")])
+        step("one field left", fields._list_fields_impl, None, None,
+             check=lambda o: [f["kind"] for f in o["fields"]] == ["PAGE"])
+        step("the text is as it was", text._get_paragraphs_impl, 1, 3, False,
+             check=lambda o: [p["text"] for p in o["paragraphs"]] == ["First: Alpha", "Second: Beta", "Page 1"])
+        step("by what the code holds", fields._unlink_fields_impl, None, "PAGE", True,
+             undo="Unlink fields", check=lambda o: o.get("unlinked") == 1)
+        step("none left to unlink is said", fields._unlink_fields_impl, "QUOTE", None, True,
+             check=lambda o: "No field" in o.get("error", ""))
+        step("close the document for fields to unlink", documents._close_document_impl, False)
     finally:
         call_document.reset(token)
 

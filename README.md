@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <strong>Real-time Microsoft Word control on Windows and macOS —<br>an MCP server with <!--tools-->105<!--/tools--> tools that works in the document beside you.</strong>
+  <strong>Real-time Microsoft Word control on Windows and macOS —<br>an MCP server with <!--tools-->106<!--/tools--> tools that works in the document beside you.</strong>
 </p>
 
 ---
@@ -189,7 +189,9 @@ Every member and constant is checked against Microsoft's documentation ([docs/re
 
 ### 🗂️ Content Controls
 
-`word_list_content_controls`, `word_insert_content_control`, `word_set_content_control` and `word_delete_content_control` read and write the tagged boxes that templates, forms and add-ins keep in a document: their text, tag, title and locks. A tag of tens of thousands of characters, as add-ins keep their data in, goes through whole. On the Mac they go through the [VBA bridge](#the-vba-bridge), since Word for Mac's scripting has no content controls.
+`word_list_content_controls`, `word_insert_content_control`, `word_set_content_control` and `word_delete_content_control` read and write the tagged boxes that templates, forms and add-ins keep in a document: their text, tag, title and locks. A tag of tens of thousands of characters, as add-ins keep their data in, goes through whole. `word_insert_content_control` with `around` makes text already in the document a control's, formatting and all. On the Mac they go through the [VBA bridge](#the-vba-bridge), since Word for Mac's scripting has no content controls.
+
+`word_unlink_fields` turns fields into the text they show, formatted as it is: those of a type (`kind`) or whose code holds a text (`contains`), in the main text, the footnotes and the endnotes.
 
 ### 🖼️ Shapes and Floating Pictures
 
@@ -289,6 +291,7 @@ Through the [VBA bridge](#the-vba-bridge) only, since Word for Mac's scripting c
 - Grouping shapes and ungrouping them (`word_group_shapes`, `word_ungroup_shape`), and a group's `members` in `word_list_shapes`
 - A floating picture in a header or footer
 - Content controls (`word_list_content_controls` and the rest)
+- Fields in footnotes and endnotes, turned into their text (`word_unlink_fields`)
 - Replies to comments and their done state, wildcard searches, and text added after an equation that ends the document
 
 Smaller differences:

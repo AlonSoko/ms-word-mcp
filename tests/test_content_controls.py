@@ -30,3 +30,12 @@ def test_the_inputs_check_what_can_be_done():
     with pytest.raises(ValidationError):
         cc.InsertContentControlInput(index=1, kind="date")
     assert cc.DeleteContentControlInput(control=2).keep_text is True
+
+
+def test_around_takes_text_already_there_alone():
+    from ms_word_mcp.tools import content_controls as cc
+
+    assert cc.InsertContentControlInput(index=1, around="bold part").around == "bold part"
+    for extra in ({"text": "x"}, {"after": "y"}, {"before": "y"}):
+        with pytest.raises(ValidationError, match="around"):
+            cc.InsertContentControlInput(index=1, around="bold part", **extra)
