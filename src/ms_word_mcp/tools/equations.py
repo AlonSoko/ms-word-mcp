@@ -483,19 +483,25 @@ def _mac_insert_equation(equation, fmt, numbered, sequence, after, before, chapt
                         field_text=chapter_codes(sequence, chapter["level"])[0],
                         preserve_formatting=False))
             chap = None
+            # The paragraph's bounds again, now that its fields' codes are in it: the
+            # number is read from the SEQ field inside them, the first. A short
+            # equation's paragraph is followed closely by the next one's field, which
+            # a margin past its text took for its own (an equation inserted above
+            # another read "2", measured on Word for Mac).
+            pstart, pend = m._bounds(doc, index)
             for j in range(1, int(doc.count(each=k.field)) + 1):
                 f = doc.fields[j]
                 code = (f.field_code.content.get() or "").split()
                 s0 = f.field_code.start_of_content.get()
                 if code and code[0].upper() == "STYLEREF" and chap_at is not None and \
-                        pstart <= s0 <= pstart + len(content) + 40:
+                        chap is None and pstart <= s0 < pend:
                     f.update_field()
                     chap = f
                 if (len(code) >= 2 and code[0].upper() == "SEQ" and code[1] == sequence
                         and may_update(f.field_code.content.get())):
                     f.update_field()
                     s0 = f.field_code.start_of_content.get()
-                    if pstart <= s0 <= pstart + len(content) + 40:
+                    if number is None and pstart <= s0 < pend:
                         number = f.result_range.content.get()
                         seq_begin = s0 - 1
             if chap is not None and number is not None:
